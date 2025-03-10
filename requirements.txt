@@ -1,0 +1,8 @@
+streamlit
+pandas
+numpy
+google-cloud-bigquery
+google-oauth2-tool
+folium
+streamlit-folium
+geopy
