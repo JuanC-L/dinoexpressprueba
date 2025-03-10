@@ -396,7 +396,7 @@ if not st.session_state["mostrar_productos"] and not st.session_state["mostrar_m
         )
         if st.button("Selecciona catálogo", key="btn_catalogo"):
             st.session_state["mostrar_productos"] = True
-            st.experimental_rerun()
+            #st.experimental_rerun()
         st.markdown("</div></div>", unsafe_allow_html=True)
     
 
@@ -421,7 +421,7 @@ elif st.session_state["mostrar_productos"] and not st.session_state["mostrar_map
     # Botón para volver atrás
     if st.button("← Volver", key="btn_volver"):
         st.session_state["mostrar_productos"] = False
-        st.experimental_rerun()
+        #st.experimental_rerun()
     
     # Obtener productos únicos del dataset de ferreterías
     productos_disponibles = sorted(ferreterias_df['Producto'].unique())
@@ -471,7 +471,7 @@ elif st.session_state["mostrar_productos"] and not st.session_state["mostrar_map
                         st.session_state["carrito"][producto_key] = cantidad_value
                     elif producto_key in st.session_state["carrito"]:
                         del st.session_state["carrito"][producto_key]
-                    st.experimental_rerun()
+                    #st.experimental_rerun()
                 
                 # Guardar la cantidad en el carrito
                 cantidad = st.number_input(
@@ -504,7 +504,7 @@ elif st.session_state["mostrar_productos"] and not st.session_state["mostrar_map
         # Botón de continuar en el sidebar
         if st.sidebar.button("Continuar", key="btn_continuar_sidebar"):
             st.session_state["mostrar_mapa"] = True
-            st.experimental_rerun()
+            #st.experimental_rerun()
     else:
         st.sidebar.warning("Agrega al menos un producto para continuar")
     
@@ -513,7 +513,7 @@ elif st.session_state["mostrar_productos"] and not st.session_state["mostrar_map
     if carrito_temp:
         if st.button("Continuar", key="btn_continuar"):
             st.session_state["mostrar_mapa"] = True
-            st.experimental_rerun()
+            #st.experimental_rerun()
     else:
         st.warning("Agrega al menos un producto para continuar")
     st.markdown("</div>", unsafe_allow_html=True)
@@ -586,19 +586,19 @@ elif st.session_state["mostrar_mapa"] and not st.session_state["mostrar_ferreter
         # Actualizar ubicación seleccionada
         nueva_ubicacion = geocodificar_inverso(clicked_lat, clicked_lng)
         st.session_state["ubicacion_seleccionada"] = nueva_ubicacion
-        st.experimental_rerun()
+        #st.experimental_rerun()
     
     # Botones de navegación
     col_atras, col_siguiente = st.columns(2)
     with col_atras:
         if st.button("← Volver a productos", key="btn_volver_productos"):
             st.session_state["mostrar_mapa"] = False
-            st.experimental_rerun()
+            #st.experimental_rerun()
     
     with col_siguiente:
         if st.button("Buscar ferreterías cercanas", key="btn_buscar_ferreterias"):
             st.session_state["mostrar_ferreterias"] = True
-            st.experimental_rerun()
+            #st.experimental_rerun()
 
 
 
@@ -674,7 +674,7 @@ elif st.session_state["mostrar_ferreterias"]:
         
         if st.button("Aplicar nuevo radio de búsqueda", key="btn_aplicar_radio"):
             st.session_state["radio_busqueda"] = nuevo_radio
-            st.experimental_rerun()
+            #st.experimental_rerun()
     
     with col_ferreterias:
         st.markdown("<h3 style='text-align: center; margin-bottom: 20px;'>Ferreterías encontradas</h3>", unsafe_allow_html=True)
