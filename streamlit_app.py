@@ -8,9 +8,10 @@ from streamlit_folium import folium_static
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
 import json
-import io
+#import io
 import math
 from folium.plugins import AntPath
+from streamlit_folium import st_folium
 
 
 
@@ -43,13 +44,27 @@ if "carrito" not in st.session_state:
     
 if "ubicacion_seleccionada" not in st.session_state:
     st.session_state["ubicacion_seleccionada"] = {
-        "latitud": -9.4195,  # Coordenadas por defecto (cerca de Lima, Perú)
-        "longitud": -75.0572,
+        "latitud": -8.111678,  # Coordenadas por defecto (cerca de Lima, Perú)
+        "longitud": -79.028774,
         "direccion": "",
         "lugar": "Perú"
     }
     
 if "radio_busqueda" not in st.session_state:
+    def debug_carrito():
+      if st.session_state["mostrar_productos"]:
+        st.sidebar.markdown("### Estado del carrito")
+        st.sidebar.write(st.session_state["carrito"])
+    debug_carrito()
+
+    if st.session_state["mostrar_mapa"] or st.session_state["mostrar_ferreterias"]:
+      if not st.session_state["carrito"]:
+          st.warning("¡El carrito está vacío! Por favor regresa y selecciona algunos productos.")
+          if st.button("← Volver a seleccionar productos"):
+              st.session_state["mostrar_mapa"] = False
+              st.session_state["mostrar_ferreterias"] = False
+              st.session_state["mostrar_productos"] = True
+              #st.experimental_rerun()
     st.session_state["radio_busqueda"] = 3  # Radio de búsqueda en km (por defecto 3km)
 
 # Estilos personalizados
@@ -324,7 +339,7 @@ def filtrar_ferreterias_cercanas(lat, lon, radio_km):
     ferreterias_cercanas = df_copy[df_copy['distancia'] <= radio_km]
     
     return ferreterias_cercanas
-
+  
 # Función para calcular el precio total por ferretería
 def calcular_precio_total_por_ferreteria(ferreterias_cercanas, carrito):
     # Convertir el DataFrame a un formato más fácil de trabajar
@@ -466,12 +481,14 @@ elif st.session_state["mostrar_productos"] and not st.session_state["mostrar_map
                 )
                 
                 # Definir callback para actualizar el carrito inmediatamente
-                def update_cart(producto_key, cantidad_value):
+                def update_cart():
+                    producto_key = producto
+                    cantidad_value = st.session_state[f"cantidad_{producto}"]
+                    
                     if cantidad_value > 0:
                         st.session_state["carrito"][producto_key] = cantidad_value
                     elif producto_key in st.session_state["carrito"]:
                         del st.session_state["carrito"][producto_key]
-                    #st.experimental_rerun()
                 
                 # Guardar la cantidad en el carrito
                 cantidad = st.number_input(
@@ -480,8 +497,7 @@ elif st.session_state["mostrar_productos"] and not st.session_state["mostrar_map
                     step=1, 
                     key=f"cantidad_{producto}",
                     value=st.session_state["carrito"].get(producto, 0),
-                    on_change=update_cart,
-                    args=(producto, st.session_state.get(f"cantidad_{producto}", 0))
+                    on_change=update_cart
                 )
                 
                 # Actualizar carrito temporal para mostrar en el resumen
@@ -539,26 +555,34 @@ elif st.session_state["mostrar_mapa"] and not st.session_state["mostrar_ferreter
                 else:
                     st.error("No se pudo encontrar la ubicación. Intenta con otra dirección.")
     
-    # Mostrar el mapa
-    m = folium.Map(
+    # Crear el mapa de Folium
+    mapa = folium.Map(
         location=[st.session_state["ubicacion_seleccionada"]["latitud"], 
-                 st.session_state["ubicacion_seleccionada"]["longitud"]], 
+                  st.session_state["ubicacion_seleccionada"]["longitud"]], 
         zoom_start=15
     )
-    
-    # Añadir marcador para la ubicación seleccionada
+
+    # Agregar marcador
     folium.Marker(
         [st.session_state["ubicacion_seleccionada"]["latitud"], 
-         st.session_state["ubicacion_seleccionada"]["longitud"]],
+        st.session_state["ubicacion_seleccionada"]["longitud"]],
         popup=st.session_state["ubicacion_seleccionada"]["direccion"],
         icon=folium.Icon(color="red", icon="map-marker")
-    ).add_to(m)
-    
-    # Función para capturar clics en el mapa
-    m.add_child(folium.LatLngPopup())
-    
-    # Mostrar el mapa
-    folium_static(m, width=700, height=500)
+    ).add_to(mapa)
+
+    # Mostrar el mapa en Streamlit
+    map_data = st_folium(mapa, width=700, height=500, returned_objects=["last_clicked"])
+
+    # Verificar si hay datos de clic
+    if map_data["last_clicked"]:
+        clicked_lat = map_data["last_clicked"]["lat"]
+        clicked_lng = map_data["last_clicked"]["lng"]
+        
+        # Actualizar ubicación seleccionada con geocodificación inversa
+        nueva_ubicacion = geocodificar_inverso(clicked_lat, clicked_lng)
+        if nueva_ubicacion:
+            st.session_state["ubicacion_seleccionada"] = nueva_ubicacion
+            st.success(f"Nueva ubicación seleccionada: {nueva_ubicacion['direccion']}")
     
     # Información sobre la ubicación seleccionada
     st.markdown("<div class='location-info'>", unsafe_allow_html=True)
@@ -578,16 +602,6 @@ elif st.session_state["mostrar_mapa"] and not st.session_state["mostrar_ferreter
     
     st.markdown("</div>", unsafe_allow_html=True)
     
-    # Extraer coordenadas del clic en el mapa
-    if 'last_clicked' in st.session_state:
-        clicked_lat = st.session_state['last_clicked']['lat']
-        clicked_lng = st.session_state['last_clicked']['lng']
-        
-        # Actualizar ubicación seleccionada
-        nueva_ubicacion = geocodificar_inverso(clicked_lat, clicked_lng)
-        st.session_state["ubicacion_seleccionada"] = nueva_ubicacion
-        #st.experimental_rerun()
-    
     # Botones de navegación
     col_atras, col_siguiente = st.columns(2)
     with col_atras:
@@ -600,9 +614,24 @@ elif st.session_state["mostrar_mapa"] and not st.session_state["mostrar_ferreter
             st.session_state["mostrar_ferreterias"] = True
             #st.experimental_rerun()
 
-
-
 elif st.session_state["mostrar_ferreterias"]:
+    st.markdown("<h3 style='margin-top: 20px;'>Tu carrito de compra</h3>", unsafe_allow_html=True)
+
+    # Crear una tabla para mostrar el carrito
+    if st.session_state["carrito"]:
+        carrito_data = []
+        for producto, cantidad in st.session_state["carrito"].items():
+            if cantidad > 0:
+                carrito_data.append({"Producto": producto, "Cantidad": cantidad})
+        
+        if carrito_data:
+            carrito_df = pd.DataFrame(carrito_data)
+            st.dataframe(carrito_df)
+    else:
+        st.warning("No hay productos en el carrito.")
+        
+    # Agrega un separador para mejorar la visualización
+    st.markdown("<hr style='margin: 20px 0;'>", unsafe_allow_html=True)
     st.markdown("<h1 class='main-header' style='text-align: center;'>Ferreterías cercanas</h1>", unsafe_allow_html=True)
     
     lat_usuario = st.session_state["ubicacion_seleccionada"]["latitud"]
