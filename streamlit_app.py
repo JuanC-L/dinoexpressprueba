@@ -64,7 +64,7 @@ if "radio_busqueda" not in st.session_state:
               st.session_state["mostrar_mapa"] = False
               st.session_state["mostrar_ferreterias"] = False
               st.session_state["mostrar_productos"] = True
-              #st.experimental_rerun()
+              st.recun()
     st.session_state["radio_busqueda"] = 3  # Radio de búsqueda en km (por defecto 3km)
 
 
