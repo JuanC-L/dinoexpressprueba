@@ -526,7 +526,7 @@ elif st.session_state["mostrar_productos"] and not st.session_state["mostrar_map
         # Botón de continuar en el sidebar
         if st.sidebar.button("Continuar", key="btn_continuar_sidebar"):
             st.session_state["mostrar_mapa"] = True
-            #st.experimental_rerun()
+            st.recun()
     else:
         st.sidebar.warning("Agrega al menos un producto para continuar")
     
@@ -535,7 +535,7 @@ elif st.session_state["mostrar_productos"] and not st.session_state["mostrar_map
     if carrito_temp:
         if st.button("Continuar", key="btn_continuar"):
             st.session_state["mostrar_mapa"] = True
-            #st.experimental_rerun()
+            st.recun()
     else:
         st.warning("Agrega al menos un producto para continuar")
     st.markdown("</div>", unsafe_allow_html=True)
