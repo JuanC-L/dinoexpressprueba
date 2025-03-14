@@ -20,7 +20,7 @@ df = pd.read_excel('MaterialesPrueba.xlsx')
 # Cargar datos de ferreterías desde CSV
 #@st.cache_data
 def cargar_ferreterias():
-    return pd.read_csv('pruebadino.csv', sep=';')
+    return pd.read_csv('pruebadino.csv')
 
 
 ferreterias_df = cargar_ferreterias()
@@ -67,13 +67,19 @@ if "radio_busqueda" not in st.session_state:
               #st.experimental_rerun()
     st.session_state["radio_busqueda"] = 3  # Radio de búsqueda en km (por defecto 3km)
 
+
+st.set_page_config(
+    page_title="Dino Express",
+    page_icon=":construction_worker:",
+)
+
 # Estilos personalizados
 st.markdown(
     """
     <style>
         .main-header {
             text-align: center;
-            color: #2e3191;
+            color: #d72525;
             font-size: 32px;
             font-weight: bold;
             margin-bottom: 10px;
@@ -112,7 +118,7 @@ st.markdown(
         .opcion-icon {
             font-size: 48px;
             margin-bottom: 15px;
-            color: #2e3191;
+            color: #d72525;
         }
         .opcion-question {
             color: #666;
@@ -122,7 +128,7 @@ st.markdown(
         .opcion-title {
             font-size: 18px;
             font-weight: bold;
-            color: #2e3191;
+            color: #d72525;
         }
         .productos-container {
             display: grid;
@@ -152,7 +158,7 @@ st.markdown(
         .producto h4 {
             font-size: 16px;
             font-weight: bold;
-            color: #2e3191;
+            color: #d72525;
             margin-bottom: 5px;
         }
         .producto p {
@@ -171,7 +177,7 @@ st.markdown(
             margin-top: 30px;
         }
         .stButton button {
-            background-color: #2e3191;
+            background-color: #d72525;
             color: white;
             border: none;
             border-radius: 5px;
@@ -180,10 +186,10 @@ st.markdown(
             width: 100%;
         }
         .stButton button:hover {
-            background-color: #1e1e70;
+            background-color: #701e1e;
         }
         .footer {
-            background-color: #2e3191;
+            background-color: #d72525;
             height: 20px;
             position: fixed;
             bottom: 0;
@@ -223,7 +229,7 @@ st.markdown(
         }
         .location-title {
             font-weight: bold;
-            color: #2e3191;
+            color: #d72525;
             margin-bottom: 5px;
         }
         .ferreteria-card {
@@ -241,7 +247,7 @@ st.markdown(
         .precio-total {
             font-size: 24px;
             font-weight: bold;
-            color: #2e3191;
+            color: #d72525;
             text-align: right;
         }
         .precio-detalle {
@@ -393,41 +399,41 @@ def calcular_precio_total_por_ferreteria(ferreterias_cercanas, carrito):
 if not st.session_state["mostrar_productos"] and not st.session_state["mostrar_mapa"] and not st.session_state["mostrar_ferreterias"]:
     # Primera pantalla - Opciones de cotización
     st.markdown("<h1 class='main-header'>Cotiza tus productos</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='sub-header'>Conoce todas las formas que tenemos para que puedas cotizar los productos que necesites, elige una de las siguientes opciones.</p>", unsafe_allow_html=True)
+    #st.markdown("<p class='sub-header'>Conoce todas las formas que tenemos para que puedas cotizar los productos que necesites, elige una de las siguientes opciones.</p>", unsafe_allow_html=True)
     
-    # Contenedor de opciones con 3 columnas
-    col1, col3 = st.columns(2)
+    # # Contenedor de opciones con 3 columnas
+    # col1 = st.columns(1)
     
-    with col1:
-        st.markdown(
-            """
-            <div class="opcion" onclick="this.querySelector('button').click();">
-                <div class="opcion-question">¿Buscas un producto?</div>
-                <div class="opcion-icon">📚</div>
-                <div class="opcion-title">Selecciona un producto de nuestro catálogo</div>
-                <div style="display:none;">
-            """, 
-            unsafe_allow_html=True
-        )
-        if st.button("Selecciona catálogo", key="btn_catalogo"):
-            st.session_state["mostrar_productos"] = True
-            #st.experimental_rerun()
-        st.markdown("</div></div>", unsafe_allow_html=True)
+    # with col1:
+    st.markdown(
+        """
+        <div class="opcion" onclick="this.querySelector('button').click();">
+            <div class="opcion-question">¿Buscas un producto?</div>
+            <div class="opcion-icon">📚</div>
+            <div class="opcion-title">Selecciona un producto de nuestro catálogo</div>
+            <div style="display:none;">
+        """, 
+        unsafe_allow_html=True
+    )
+    if st.button("Selecciona catálogo", key="btn_catalogo"):
+        st.session_state["mostrar_productos"] = True
+        #st.experimental_rerun()
+    st.markdown("</div></div>", unsafe_allow_html=True)
     
 
-    with col3:
-        st.markdown(
-            """
-            <div class="opcion" onclick="this.querySelector('button').click();">
-                <div class="opcion-question">¿Tienes una lista?</div>
-                <div class="opcion-icon">📁</div>
-                <div class="opcion-title">Sube tu lista de productos</div>
-                <div style="display:none;">
-            """, 
-            unsafe_allow_html=True
-        )
-        st.button("Subir lista", key="btn_lista")
-        st.markdown("</div></div>", unsafe_allow_html=True)
+    # with col3:
+    #     st.markdown(
+    #         """
+    #         <div class="opcion" onclick="this.querySelector('button').click();">
+    #             <div class="opcion-question">¿Tienes una lista?</div>
+    #             <div class="opcion-icon">📁</div>
+    #             <div class="opcion-title">Sube tu lista de productos</div>
+    #             <div style="display:none;">
+    #         """, 
+    #         unsafe_allow_html=True
+    #     )
+    #     st.button("Subir lista", key="btn_lista")
+    #     st.markdown("</div></div>", unsafe_allow_html=True)
 
 elif st.session_state["mostrar_productos"] and not st.session_state["mostrar_mapa"] and not st.session_state["mostrar_ferreterias"]:
     # Segunda pantalla - Selección de productos
@@ -536,7 +542,7 @@ elif st.session_state["mostrar_productos"] and not st.session_state["mostrar_map
     
 elif st.session_state["mostrar_mapa"] and not st.session_state["mostrar_ferreterias"]:
     # Tercera pantalla - Selección de ubicación en mapa
-    st.markdown("<h1 class='main-header'>Elige tu ubicación de entrega</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 class='main-header'>Elige tu ubicación</h1>", unsafe_allow_html=True)
     
     # Columnas para layout
     col1, col2 = st.columns([3, 1])
@@ -584,11 +590,12 @@ elif st.session_state["mostrar_mapa"] and not st.session_state["mostrar_ferreter
             st.session_state["ubicacion_seleccionada"] = nueva_ubicacion
             st.success(f"Nueva ubicación seleccionada: {nueva_ubicacion['direccion']}")
     
+
     # Información sobre la ubicación seleccionada
     st.markdown("<div class='location-info'>", unsafe_allow_html=True)
     st.markdown("<div class='location-title'>Ubicación seleccionada:</div>", unsafe_allow_html=True)
     st.write(f"**Dirección:** {st.session_state['ubicacion_seleccionada']['direccion']}")
-    st.write(f"**Coordenadas:** {st.session_state['ubicacion_seleccionada']['latitud']}, {st.session_state['ubicacion_seleccionada']['longitud']}")
+    #st.write(f"**Coordenadas:** {st.session_state['ubicacion_seleccionada']['latitud']}, {st.session_state['ubicacion_seleccionada']['longitud']}")
     
     # Añadir slider para el radio de búsqueda
     st.slider(
@@ -615,23 +622,23 @@ elif st.session_state["mostrar_mapa"] and not st.session_state["mostrar_ferreter
             #st.experimental_rerun()
 
 elif st.session_state["mostrar_ferreterias"]:
-    st.markdown("<h3 style='margin-top: 20px;'>Tu carrito de compra</h3>", unsafe_allow_html=True)
+    # st.markdown("<h3 style='margin-top: 20px;'>Tu carrito de compra</h3>", unsafe_allow_html=True)
 
-    # Crear una tabla para mostrar el carrito
-    if st.session_state["carrito"]:
-        carrito_data = []
-        for producto, cantidad in st.session_state["carrito"].items():
-            if cantidad > 0:
-                carrito_data.append({"Producto": producto, "Cantidad": cantidad})
+    # # Crear una tabla para mostrar el carrito
+    # if st.session_state["carrito"]:
+    #     carrito_data = []
+    #     for producto, cantidad in st.session_state["carrito"].items():
+    #         if cantidad > 0:
+    #             carrito_data.append({"Producto": producto, "Cantidad": cantidad})
         
-        if carrito_data:
-            carrito_df = pd.DataFrame(carrito_data)
-            st.dataframe(carrito_df)
-    else:
-        st.warning("No hay productos en el carrito.")
+    #     if carrito_data:
+    #         carrito_df = pd.DataFrame(carrito_data)
+    #         st.dataframe(carrito_df)
+    # else:
+    #     st.warning("No hay productos en el carrito.")
         
     # Agrega un separador para mejorar la visualización
-    st.markdown("<hr style='margin: 20px 0;'>", unsafe_allow_html=True)
+    #st.markdown("<hr style='margin: 20px 0;'>", unsafe_allow_html=True)
     st.markdown("<h1 class='main-header' style='text-align: center;'>Ferreterías cercanas</h1>", unsafe_allow_html=True)
     
     lat_usuario = st.session_state["ubicacion_seleccionada"]["latitud"]
