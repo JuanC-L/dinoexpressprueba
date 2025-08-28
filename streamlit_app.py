@@ -142,12 +142,12 @@ def leer_excel(path):
     info_df = None
     for sh, df in frames.items():
         cols = {c.strip(): c for c in df.columns}
-        needed = ["Nombre del Asociado",
-                  "Dirección tienda",
-                  "Cta de abono para la venta",
+        needed = ["Nombre del Asociado:",
+                  "Dirección tienda:",
+                  "Cta de abono para la venta:",
                   "Persona de contacto",
-                  "Número de Contacto",
-                  "Número o Código Yape / Plin"]
+                  "Número de Contacto:",
+                  "Número o Código Yape / Plin:"]
         if all(any(k.lower() == c.strip().lower() for c in df.columns) for k in needed):
             def map_col(name):
                 for c in df.columns:
@@ -155,12 +155,12 @@ def leer_excel(path):
                         return c
                 return None
             info_df = df.rename(columns={
-                map_col("Nombre del Asociado"): "Nombre del Asociado",
-                map_col("Dirección tienda"): "Dirección tienda",
-                map_col("Cta de abono para la venta"): "Cta de abono para la venta",
+                map_col("Nombre del Asociado:"): "Nombre del Asociado",
+                map_col("Dirección tienda:"): "Dirección tienda",
+                map_col("Cta de abono para la venta:"): "Cta de abono para la venta",
                 map_col("Persona de contacto"): "Persona de contacto",
-                map_col("Número de Contacto"): "Número de Contacto",
-                map_col("Número o Código Yape / Plin"): "Número o Código Yape / Plin",
+                map_col("Número de Contacto:"): "Número de Contacto",
+                map_col("Número o Código Yape / Plin:"): "Número o Código Yape / Plin",
             })[[
                 "Nombre del Asociado",
                 "Dirección tienda",
@@ -667,3 +667,4 @@ elif st.session_state["paso"] == "mapa":
     pantalla_mapa()
 else:
     pantalla_resultados()
+
