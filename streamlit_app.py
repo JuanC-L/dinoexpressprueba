@@ -9,6 +9,7 @@ from datetime import datetime
 
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
+from geopy.exc import GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError
 
 import folium
 from folium.plugins import AntPath, MarkerCluster
@@ -33,6 +34,13 @@ st.markdown("""
 .producto{ text-align:center;padding:16px 12px;border:1px solid #eee;border-radius:12px;background:#fff;
            box-shadow:0 2px 8px rgba(0,0,0,.04);}
 .location-info{ background:#fff;border:1px solid #eee;border-radius:12px;padding:12px 14px;margin-top:10px;}
+.pill {
+  display:inline-block; background:#fff; border:1px solid #e7e7e7; border-radius:999px;
+  padding:8px 14px; font-size:14px; box-shadow:0 1px 3px rgba(0,0,0,.06);
+}
+.card-addr {
+  border:1px solid #e7e7e7; border-radius:12px; padding:12px 14px; background:#fff; margin-top:8px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -141,25 +149,33 @@ def leer_excel(path):
 base_df, precios_df, coords_df = leer_excel(EXCEL_PATH)
 
 # ===========================
-# GEO & GEOCODING (rápido)
+# GEO & GEOCODING (resiliente)
 # ===========================
 def dist_km(a_lat, a_lon, b_lat, b_lon):
     return geodesic((a_lat, a_lon), (b_lat, b_lon)).kilometers
 
 @st.cache_data(show_spinner=False)
 def geocode_once(q):
-    loc = Nominatim(user_agent="dino_pacasmayo_app").geocode(q, timeout=8)
-    if loc:
-        return {"lat": loc.latitude, "lon": loc.longitude, "direccion": loc.address}
-    return None
+    """
+    Geocoder robusto: captura errores y devuelve None cuando el servicio no está disponible.
+    """
+    try:
+        geocoder = Nominatim(user_agent="dino_pacasmayo_app")
+        loc = geocoder.geocode(q, timeout=8)
+        if loc:
+            return {"lat": loc.latitude, "lon": loc.longitude, "direccion": loc.address}
+        return None
+    except (GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError, Exception):
+        return None
 
 def geocodificar_inverso(lat, lon):
     # Solo si el usuario lo pide (es más lento)
     try:
-        loc = Nominatim(user_agent="dino_pacasmayo_app").reverse((lat, lon), timeout=8)
+        geocoder = Nominatim(user_agent="dino_pacasmayo_app")
+        loc = geocoder.reverse((lat, lon), timeout=8)
         if loc:
             return {"lat": lat, "lon": lon, "direccion": loc.address}
-    except Exception:
+    except (GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError, Exception):
         pass
     return {"lat": lat, "lon": lon, "direccion": f"{lat:.6f}, {lon:.6f}"}
 
@@ -213,7 +229,6 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
     c = canvas.Canvas(buf, pagesize=A4)
     W, H = A4
 
-    # Encabezado
     c.setFillColor(colors.HexColor("#d72525")); c.setFont("Helvetica-Bold", 16)
     c.drawString(2*cm, H-2*cm, "DINO EXPRESS - Proforma")
     c.setFillColor(colors.black); c.setFont("Helvetica", 10)
@@ -221,7 +236,6 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
     c.drawString(2*cm, H-3.2*cm, f"Ferretería: {ferre['ferreteria']}")
     c.drawString(2*cm, H-3.7*cm, f"Ubicación cliente: {ubic_usuario.get('direccion','')}")
 
-    # Cabecera tabla
     y = H-4.6*cm
     c.setFont("Helvetica-Bold", 10)
     c.drawString(2*cm, y, "Producto")
@@ -230,7 +244,6 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
     c.drawString(15.1*cm, y, "Importe")
     c.line(2*cm, y-0.2*cm, 19*cm, y-0.2*cm)
 
-    # Filas
     c.setFont("Helvetica", 10); y -= 0.6*cm
     for item in ferre["detalle"]:
         if y < 3.0*cm:
@@ -336,7 +349,7 @@ def pantalla_productos():
             st.session_state["paso"] = "mapa"; st.rerun()
 
 # ===========================
-# UI: MAPA (rápido + markers de ferreterías)
+# UI: MAPA (rápido + resiliente)
 # ===========================
 def pantalla_mapa():
     st.markdown("<h1 class='main-header'>Elige tu ubicación</h1>", unsafe_allow_html=True)
@@ -354,14 +367,29 @@ def pantalla_mapa():
                 if g:
                     st.session_state["ubicacion"] = {"lat": g["lat"], "lon": g["lon"], "direccion": g["direccion"]}
                     st.success("Ubicación encontrada.")
+                    st.rerun()
                 else:
-                    st.error("No se pudo geocodificar la dirección ingresada.")
+                    st.error("No se pudo geocodificar en este momento. Prueba hacer clic en el mapa para elegir el punto.")
 
     u = st.session_state["ubicacion"]
+
+    # Tarjeta siempre visible con la ubicación seleccionada
+    st.markdown(f"""
+    <div class="card-addr">
+      <div><span class="pill">📍 Ubicación seleccionada</span></div>
+      <div style="margin-top:6px;"><b>{u.get('direccion','')}</b></div>
+      <div style="color:#666;">Lat: {u['lat']:.6f} &nbsp;&middot;&nbsp; Lon: {u['lon']:.6f}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Mapa
     m = folium.Map(location=[u["lat"], u["lon"]], zoom_start=MAP_ZOOM, tiles="CartoDB positron")
     folium.Marker([u["lat"], u["lon"]], popup=u["direccion"], icon=folium.Icon(color="red", icon="home")).add_to(m)
 
-    # Mostrar ferreterías en el mapa del selector
+    # Indicador de clic (muestra coordenadas al hacer clic)
+    folium.LatLngPopup().add_to(m)
+
+    # Capa de ferreterías en el mapa del selector
     with c2:
         st.markdown("<div class='location-info'><b>Opciones de vista</b></div>", unsafe_allow_html=True)
         st.checkbox("Ver todas las ferreterías en el mapa", key="mostrar_todas_en_mapa")
@@ -371,12 +399,14 @@ def pantalla_mapa():
         if st.button("Buscar ferreterías cercanas"): st.session_state["paso"] = "resultados"; st.rerun()
         if st.button("← Volver a productos"): st.session_state["paso"] = "productos"; st.rerun()
 
-    # Capa de ferreterías (todas o por radio)
     all_coords = base_df.dropna(subset=["latitud","longitud"]).copy()
     if st.session_state["mostrar_todas_en_mapa"]:
         capa_df = all_coords
     else:
-        capa_df = ferreterias_en_radio(u["lat"], u["lon"], st.session_state["radio_km"])
+        # Si solo quieres dentro del radio mientras seleccionas, usa esta:
+        df_temp = all_coords.copy()
+        df_temp["distancia"] = df_temp.apply(lambda r: dist_km(u["lat"], u["lon"], r["latitud"], r["longitud"]), axis=1)
+        capa_df = df_temp[df_temp["distancia"] <= st.session_state["radio_km"]]
 
     if not capa_df.empty:
         cluster = MarkerCluster().add_to(m)
@@ -393,9 +423,10 @@ def pantalla_mapa():
             """
             folium.Marker([r["latitud"], r["longitud"]], popup=folium.Popup(popup_html, max_width=220), icon=icon).add_to(cluster)
 
-    map_ret = st_folium(m, width=900, height=520, returned_objects=["last_clicked"])
+    # ¡Clave!: darle una key fija para que se refresque correctamente
+    map_ret = st_folium(m, width=900, height=520, returned_objects=["last_clicked"], key="map_selector")
 
-    # Debounce de clic en el mapa (sin reverse-geocoding por defecto)
+    # Debounce de clic en el mapa + actualización instantánea + rerun
     if map_ret and map_ret.get("last_clicked"):
         now = time.time()
         if now - st.session_state["last_click_ts"] > 0.5:  # 500 ms
@@ -406,7 +437,7 @@ def pantalla_mapa():
                 st.session_state["ubicacion"] = {"lat": lat, "lon": lon, "direccion": g2["direccion"]}
             else:
                 st.session_state["ubicacion"] = {"lat": lat, "lon": lon, "direccion": f"{lat:.6f}, {lon:.6f}"}
-            st.success("Ubicación actualizada.")
+            st.rerun()  # fuerza a repintar el nuevo pin y la tarjeta
 
 # ===========================
 # UI: RESULTADOS
@@ -421,6 +452,15 @@ def pantalla_resultados():
     u = st.session_state["ubicacion"]; radio = st.session_state["radio_km"]
     cercanas = ferreterias_en_radio(u["lat"], u["lon"], radio)
     resumen = resumen_por_ferreteria(cercanas, st.session_state["carrito"])[:3]
+
+    # Tarjeta de ubicación elegida (también aquí)
+    st.markdown(f"""
+    <div class="card-addr">
+      <div><span class="pill">📍 Ubicación seleccionada</span></div>
+      <div style="margin-top:6px;"><b>{u.get('direccion','')}</b></div>
+      <div style="color:#666;">Lat: {u['lat']:.6f} &nbsp;&middot;&nbsp; Lon: {u['lon']:.6f}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
     col_map, col_list = st.columns([1, 1])
     with col_map:
