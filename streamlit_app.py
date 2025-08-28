@@ -39,93 +39,104 @@ st.markdown("""
 @st.cache_data
 def leer_excel(path):
     """
-    Hoja 1: Coordenadas (acepta WKT o columnas lat/lon)
-    Hoja 2: Precios (Ferreteria | Categoría | Producto | Marca | Precio Cliente Final en Soles)
+    Hoja 1 (coords): Nombre del Asociado | Coordenadas  (texto 'lat,lon')
+    Hoja 2 (precios): Ferreteria | Categoría | Producto | Marca | Precio Cliente Final en Soles
+    Devuelve: base_df (precios + lat/long), precios_df, coords_df
     """
     xls = pd.ExcelFile(path)
+    frames = {sh: pd.read_excel(xls, sh) for sh in xls.sheet_names}
 
-    # --- Hoja 1: Coordenadas ---
-    df_coords = pd.read_excel(xls, xls.sheet_names[0])
-    # normalización de nombres
-    df_coords.columns = [str(c).strip() for c in df_coords.columns]
+    # --- helpers ---
+    import unicodedata
+    def normalize_name(s: str) -> str:
+        if pd.isna(s): return ""
+        s = str(s).strip()
+        s = "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+        s = " ".join(s.split())  # colapsa espacios
+        return s.upper()
 
-    # Detectar lat/lon
-    def extraer_lat_lon(df):
-        cols = {c.lower(): c for c in df.columns}
-        lat = None; lon = None
-        # opciones comunes
-        for cand in ["latitud", "latitude", "lat"]:
-            if cand in cols: lat = cols[cand]; break
-        for cand in ["longitud", "longitude", "lon", "lng"]:
-            if cand in cols: lon = cols[cand]; break
-        if lat and lon:
-            return df[lat].astype(float), df[lon].astype(float)
-        # si viene WKT
-        if "WKT" in df.columns or "wkt" in cols:
-            col = "WKT" if "WKT" in df.columns else cols["wkt"]
-            lon_s = df[col].astype(str).str.extract(r'POINT \(([-\d\.]+) ', expand=False)
-            lat_s = df[col].astype(str).str.extract(r'POINT \([-\d\.]+ ([-\d\.]+)\)', expand=False)
-            return lat_s.astype(float), lon_s.astype(float)
-        raise ValueError("No encuentro columnas de coordenadas (Lat/Long o WKT) en la Hoja 1.")
+    # detectar hojas
+    precios_df, coords_df = None, None
 
-    lat_series, lon_series = extraer_lat_lon(df_coords)
-    df_coords["latitud"] = lat_series
-    df_coords["longitud"] = lon_series
-
-    # columna de nombre de ferretería en hoja 1
-    # intenta detectar "Ferreteria" o "Nombre Cliente"
-    nombre_col = None
-    for cand in ["Ferreteria", "Ferretería", "Nombre Cliente", "nombre cliente", "ferreteria"]:
-        if cand in df_coords.columns:
-            nombre_col = cand
+    # busca precios por columnas clave
+    for sh, df in frames.items():
+        cols = {c.strip(): c for c in df.columns}
+        has_f = any(k in cols for k in ["Ferreteria", "Ferretería", "ferreteria"])
+        has_p = any(k in cols for k in ["Producto", "producto"])
+        has_prec = any(k in cols for k in ["Precio Cliente Final en Soles", "Precio", "precio", "Precio Cliente Final"])
+        if has_f and has_p and has_prec:
+            col_f   = next(cols[k] for k in ["Ferreteria", "Ferretería", "ferreteria"] if k in cols)
+            col_prod= next(cols[k] for k in ["Producto", "producto"] if k in cols)
+            col_prec= next(cols[k] for k in ["Precio Cliente Final en Soles", "Precio Cliente Final", "Precio", "precio"] if k in cols)
+            precios_df = df.rename(columns={
+                col_f:"Ferreteria", col_prod:"Producto", col_prec:"Precio"
+            }).copy()
+            precios_df["Precio"] = pd.to_numeric(precios_df["Precio"], errors="coerce")
+            # normaliza clave de join
+            precios_df["__JOIN_KEY__"] = precios_df["Ferreteria"].apply(normalize_name)
             break
-    if not nombre_col:
-        # si no existe, crea una clave a partir de índice
-        df_coords["Ferreteria"] = df_coords.index.astype(str)
-        nombre_col = "Ferreteria"
 
-    df_coords_ren = df_coords.rename(columns={nombre_col: "Ferreteria"})
-    df_coords_ren = df_coords_ren[["Ferreteria", "latitud", "longitud"]].dropna(subset=["latitud", "longitud"])
+    # busca coords exacto por 'Nombre del Asociado' + 'Coordenadas'
+    for sh, df in frames.items():
+        cols = {c.strip(): c for c in df.columns}
+        if any(k in cols for k in ["Nombre del Asociado", "nombre del asociado"]) and \
+           any(k in cols for k in ["Coordenadas", "coordenadas"]):
+            col_name = next(cols[k] for k in ["Nombre del Asociado", "nombre del asociado"] if k in cols)
+            col_coord= next(cols[k] for k in ["Coordenadas", "coordenadas"] if k in cols)
+            tmp = df[[col_name, col_coord]].copy().rename(columns={
+                col_name: "Nombre del Asociado",
+                col_coord: "Coordenadas"
+            })
+            # separar "lat,lon" (tolera coma decimal o punto de miles)
+            def parse_pair(s):
+                if pd.isna(s): return pd.NA, pd.NA
+                t = str(s).strip()
+                # quita espacios
+                t = t.replace(" ", "")
+                # detecta dos números separados por coma
+                parts = t.split(",")
+                if len(parts) >= 2:
+                    # primer valor = lat, segundo = lon (tu ejemplo)
+                    lat_s, lon_s = parts[0], parts[1]
+                    # normaliza decimales con coma
+                    lat_s = lat_s.replace(".", "X").replace(",", ".").replace("X", ".")
+                    lon_s = lon_s.replace(".", "X").replace(",", ".").replace("X", ".")
+                    try:
+                        return float(lat_s), float(lon_s)
+                    except:
+                        return pd.NA, pd.NA
+                return pd.NA, pd.NA
+            tmp[["latitud","longitud"]] = tmp["Coordenadas"].apply(lambda s: pd.Series(parse_pair(s)))
+            # clave de join
+            tmp["__JOIN_KEY__"] = tmp["Nombre del Asociado"].apply(normalize_name)
+            coords_df = tmp[["Nombre del Asociado", "latitud", "longitud", "__JOIN_KEY__"]].dropna(subset=["latitud","longitud"])
+            break
 
-    # --- Hoja 2: Precios ---
-    df_prices = pd.read_excel(xls, xls.sheet_names[1])
-    df_prices.columns = [str(c).strip() for c in df_prices.columns]
+    # validaciones amigables
+    if precios_df is None:
+        st.error("No encontré la hoja de PRECIOS. Revisa que existan columnas: Ferreteria, Producto, Precio Cliente Final en Soles.")
+        for sh, df in frames.items(): st.write(f"**Hoja {sh}** →", list(df.columns))
+        st.stop()
+    if coords_df is None:
+        st.error("No encontré la hoja de COORDENADAS con columnas: 'Nombre del Asociado' y 'Coordenadas' (lat,lon).")
+        for sh, df in frames.items(): st.write(f"**Hoja {sh}** →", list(df.columns))
+        st.stop()
 
-    # mapeo robusto de columnas esperadas
-    def pick(colnames, *cands):
-        for c in cands:
-            if c in colnames:
-                return c
-        return None
+    # merge por clave normalizada
+    base = precios_df.merge(
+        coords_df[["__JOIN_KEY__", "latitud", "longitud"]],
+        on="__JOIN_KEY__", how="left"
+    ).drop(columns=["__JOIN_KEY__"])
 
-    cn = set(df_prices.columns)
-    col_f = pick(cn, "Ferreteria", "Ferretería", "ferreteria")
-    col_cat = pick(cn, "Categoría", "Categoria", "categoría", "categoria")
-    col_prod = pick(cn, "Producto", "producto")
-    col_marca = pick(cn, "Marca", "marca")
-    col_precio = pick(cn, "Precio Cliente Final en Soles", "Precio", "precio", "Precio Cliente Final", "Precio Final")
+    # reporte
+    faltan = base["latitud"].isna().sum()
+    if faltan > 0:
+        st.warning(f"{faltan} registros no obtuvieron coordenadas. Verifica que 'Ferreteria' coincida con 'Nombre del Asociado' (acentos/espacios).")
 
-    missing = [n for n, v in {
-        "Ferreteria": col_f, "Categoría": col_cat, "Producto": col_prod, 
-        "Marca": col_marca, "Precio Cliente Final en Soles": col_precio
-    }.items() if v is None]
-    if missing:
-        raise ValueError(f"Faltan columnas en la Hoja 2: {missing}")
-
-    df_prices_ren = df_prices.rename(columns={
-        col_f: "Ferreteria",
-        col_cat: "Categoria",
-        col_prod: "Producto",
-        col_marca: "Marca",
-        col_precio: "Precio"
-    })
-    # coerción de precio
-    df_prices_ren["Precio"] = pd.to_numeric(df_prices_ren["Precio"], errors="coerce")
-
-    # merge lógico: precios + coords
-    base = df_prices_ren.merge(df_coords_ren, on="Ferreteria", how="left")
-
-    return base, df_prices_ren, df_coords_ren
+    # también devolvemos dataframes normalizados
+    precios_clean = precios_df.rename(columns={"__JOIN_KEY__":"_join_key"}).copy()
+    coords_clean  = coords_df.rename(columns={"__JOIN_KEY__":"_join_key"}).copy()
+    return base, precios_clean, coords_clean
 
 base_df, precios_df, coords_df = leer_excel(EXCEL_PATH)
 
@@ -490,3 +501,4 @@ elif st.session_state["paso"] == "mapa":
     pantalla_mapa()
 else:
     pantalla_resultados()
+
