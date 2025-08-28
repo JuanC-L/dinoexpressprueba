@@ -154,19 +154,43 @@ base_df, precios_df, coords_df = leer_excel(EXCEL_PATH)
 def dist_km(a_lat, a_lon, b_lat, b_lon):
     return geodesic((a_lat, a_lon), (b_lat, b_lon)).kilometers
 
+# También mejora la función geocode_once para mejor manejo de errores:
 @st.cache_data(show_spinner=False)
 def geocode_once(q):
     """
     Geocoder robusto: captura errores y devuelve None cuando el servicio no está disponible.
     """
+    if not q or not q.strip():
+        return None
+        
     try:
-        geocoder = Nominatim(user_agent="dino_pacasmayo_app")
-        loc = geocoder.geocode(q, timeout=8)
-        if loc:
-            return {"lat": loc.latitude, "lon": loc.longitude, "direccion": loc.address}
+        geocoder = Nominatim(user_agent="dino_pacasmayo_app", timeout=10)
+        
+        # Intentar geocodificar con diferentes formatos
+        queries = [
+            q.strip(),
+            f"{q.strip()}, Lima, Perú",
+            f"{q.strip()}, Perú"
+        ]
+        
+        for query in queries:
+            try:
+                loc = geocoder.geocode(query, timeout=8)
+                if loc:
+                    return {
+                        "lat": loc.latitude, 
+                        "lon": loc.longitude, 
+                        "direccion": loc.address
+                    }
+            except (GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError):
+                continue
+                
         return None
-    except (GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError, Exception):
+        
+    except Exception as e:
+        print(f"Error en geocodificación: {e}")
         return None
+    
 
 def geocodificar_inverso(lat, lon):
     # Solo si el usuario lo pide (es más lento)
@@ -351,25 +375,41 @@ def pantalla_productos():
 # ===========================
 # UI: MAPA (rápido + resiliente)
 # ===========================
+# Sección corregida de la función pantalla_mapa()
+
 def pantalla_mapa():
     st.markdown("<h1 class='main-header'>Elige tu ubicación</h1>", unsafe_allow_html=True)
     if not st.session_state["carrito"]:
         st.warning("Tu carrito está vacío. Regresa y selecciona productos.")
-        if st.button("← Volver a productos"): st.session_state["paso"] = "productos"; st.rerun()
+        if st.button("← Volver a productos"): 
+            st.session_state["paso"] = "productos"
+            st.rerun()
         return
 
     c1, c2 = st.columns([3, 1])
     with c1:
-        addr = st.text_input("Ingresa tu dirección o referencia")
-        if st.button("Buscar"):
+        # Usar un formulario para manejar mejor la búsqueda
+        with st.form("buscar_direccion"):
+            addr = st.text_input("Ingresa tu dirección o referencia", placeholder="Ej: Av. Arequipa 123, Lima")
+            buscar_clicked = st.form_submit_button("🔍 Buscar dirección")
+            
+        if buscar_clicked:
             if addr.strip():
-                g = geocode_once(addr.strip())  # geocoding solo al presionar
-                if g:
-                    st.session_state["ubicacion"] = {"lat": g["lat"], "lon": g["lon"], "direccion": g["direccion"]}
-                    st.success("Ubicación encontrada.")
-                    st.rerun()
-                else:
-                    st.error("No se pudo geocodificar en este momento. Prueba hacer clic en el mapa para elegir el punto.")
+                with st.spinner("Buscando dirección..."):
+                    g = geocode_once(addr.strip())
+                    if g:
+                        st.session_state["ubicacion"] = {
+                            "lat": g["lat"], 
+                            "lon": g["lon"], 
+                            "direccion": g["direccion"]
+                        }
+                        st.success(f"✅ Ubicación encontrada: {g['direccion']}")
+                        time.sleep(0.5)  # Pequeña pausa para que el usuario vea el mensaje
+                        st.rerun()
+                    else:
+                        st.error("❌ No se pudo encontrar la dirección. Intenta con otra descripción o haz clic en el mapa.")
+            else:
+                st.warning("⚠️ Por favor ingresa una dirección para buscar.")
 
     u = st.session_state["ubicacion"]
 
@@ -377,35 +417,47 @@ def pantalla_mapa():
     st.markdown(f"""
     <div class="card-addr">
       <div><span class="pill">📍 Ubicación seleccionada</span></div>
-      <div style="margin-top:6px;"><b>{u.get('direccion','')}</b></div>
+      <div style="margin-top:6px;"><b>{u.get('direccion','Ubicación no especificada')}</b></div>
       <div style="color:#666;">Lat: {u['lat']:.6f} &nbsp;&middot;&nbsp; Lon: {u['lon']:.6f}</div>
     </div>
     """, unsafe_allow_html=True)
 
-    # Mapa
+    # Resto del código del mapa...
     m = folium.Map(location=[u["lat"], u["lon"]], zoom_start=MAP_ZOOM, tiles="CartoDB positron")
-    folium.Marker([u["lat"], u["lon"]], popup=u["direccion"], icon=folium.Icon(color="red", icon="home")).add_to(m)
+    folium.Marker([u["lat"], u["lon"]], popup=u.get("direccion", "Tu ubicación"), 
+                  icon=folium.Icon(color="red", icon="home")).add_to(m)
 
     # Indicador de clic (muestra coordenadas al hacer clic)
     folium.LatLngPopup().add_to(m)
 
-    # Capa de ferreterías en el mapa del selector
+    # Panel lateral con opciones
     with c2:
         st.markdown("<div class='location-info'><b>Opciones de vista</b></div>", unsafe_allow_html=True)
         st.checkbox("Ver todas las ferreterías en el mapa", key="mostrar_todas_en_mapa")
         tmp_radio = st.slider("Radio de búsqueda (km)", 1, 15, st.session_state["radio_km"], key="radio_tmp")
-        if st.button("Aplicar radio"): st.session_state["radio_km"] = tmp_radio; st.rerun()
+        if st.button("Aplicar radio"): 
+            st.session_state["radio_km"] = tmp_radio
+            st.rerun()
         st.checkbox("Obtener nombre de la dirección al hacer clic (más lento)", key="revgeo_enabled")
-        if st.button("Buscar ferreterías cercanas"): st.session_state["paso"] = "resultados"; st.rerun()
-        if st.button("← Volver a productos"): st.session_state["paso"] = "productos"; st.rerun()
+        
+        # Botones de navegación con mejor diseño
+        st.markdown("---")
+        if st.button("🔍 Buscar ferreterías cercanas", type="primary", use_container_width=True): 
+            st.session_state["paso"] = "resultados"
+            st.rerun()
+        if st.button("← Volver a productos", use_container_width=True): 
+            st.session_state["paso"] = "productos"
+            st.rerun()
 
+    # Resto del código para mostrar ferreterías en el mapa...
     all_coords = base_df.dropna(subset=["latitud","longitud"]).copy()
     if st.session_state["mostrar_todas_en_mapa"]:
         capa_df = all_coords
     else:
-        # Si solo quieres dentro del radio mientras seleccionas, usa esta:
         df_temp = all_coords.copy()
-        df_temp["distancia"] = df_temp.apply(lambda r: dist_km(u["lat"], u["lon"], r["latitud"], r["longitud"]), axis=1)
+        df_temp["distancia"] = df_temp.apply(
+            lambda r: dist_km(u["lat"], u["lon"], r["latitud"], r["longitud"]), axis=1
+        )
         capa_df = df_temp[df_temp["distancia"] <= st.session_state["radio_km"]]
 
     if not capa_df.empty:
@@ -421,23 +473,40 @@ def pantalla_mapa():
                     <small>Lat: {r['latitud']:.5f}, Lon: {r['longitud']:.5f}</small>
                 </div>
             """
-            folium.Marker([r["latitud"], r["longitud"]], popup=folium.Popup(popup_html, max_width=220), icon=icon).add_to(cluster)
+            folium.Marker(
+                [r["latitud"], r["longitud"]], 
+                popup=folium.Popup(popup_html, max_width=220), 
+                icon=icon
+            ).add_to(cluster)
 
-    # ¡Clave!: darle una key fija para que se refresque correctamente
+    # Manejo del clic en el mapa con mejor debounce
     map_ret = st_folium(m, width=900, height=520, returned_objects=["last_clicked"], key="map_selector")
 
-    # Debounce de clic en el mapa + actualización instantánea + rerun
     if map_ret and map_ret.get("last_clicked"):
         now = time.time()
         if now - st.session_state["last_click_ts"] > 0.5:  # 500 ms
             st.session_state["last_click_ts"] = now
-            lat = map_ret["last_clicked"]["lat"]; lon = map_ret["last_clicked"]["lng"]
+            lat = map_ret["last_clicked"]["lat"]
+            lon = map_ret["last_clicked"]["lng"]
+            
             if st.session_state["revgeo_enabled"]:
-                g2 = geocodificar_inverso(lat, lon)
-                st.session_state["ubicacion"] = {"lat": lat, "lon": lon, "direccion": g2["direccion"]}
+                with st.spinner("Obteniendo dirección..."):
+                    g2 = geocodificar_inverso(lat, lon)
+                    st.session_state["ubicacion"] = {
+                        "lat": lat, 
+                        "lon": lon, 
+                        "direccion": g2["direccion"]
+                    }
             else:
-                st.session_state["ubicacion"] = {"lat": lat, "lon": lon, "direccion": f"{lat:.6f}, {lon:.6f}"}
-            st.rerun()  # fuerza a repintar el nuevo pin y la tarjeta
+                st.session_state["ubicacion"] = {
+                    "lat": lat, 
+                    "lon": lon, 
+                    "direccion": f"Coordenadas: {lat:.6f}, {lon:.6f}"
+                }
+            st.rerun()
+
+
+
 
 # ===========================
 # UI: RESULTADOS
@@ -511,3 +580,4 @@ elif st.session_state["paso"] == "mapa":
     pantalla_mapa()
 else:
     pantalla_resultados()
+
