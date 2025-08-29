@@ -124,100 +124,6 @@ def leer_excel(path):
             coords_df = tmp[["Nombre del Asociado","latitud","longitud","__JOIN_KEY__"]].dropna(subset=["latitud","longitud"])
             break
 
-# MODIFICACIONES AL CÓDIGO ORIGINAL
-
-# 1. Modificar la función leer_excel para incluir la hoja de información
-@st.cache_data
-def leer_excel(path):
-    """
-    Hoja coords:  Nombre del Asociado | Coordenadas (texto 'lat,lon')
-    Hoja precios: Ferreteria | Categoría | Producto | Marca | Precio Cliente Final en Soles
-    Hoja información: Información detallada de cada asociado
-    Devuelve: base_df (precios + lat/long), precios_df, coords_df, info_df
-    """
-    xls = pd.ExcelFile(path)
-    frames = {sh: pd.read_excel(xls, sh) for sh in xls.sheet_names}
-
-    def normalize_name(s: str) -> str:
-        if pd.isna(s): return ""
-        s = str(s).strip()
-        s = "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
-        s = " ".join(s.split())
-        return s.upper()
-
-    # Detectar PRECIOS
-    precios_df = None
-    for sh, df in frames.items():
-        cols = {c.strip(): c for c in df.columns}
-        has_f = any(k in cols for k in ["Ferreteria", "Ferretería", "ferreteria"])
-        has_p = any(k in cols for k in ["Producto", "producto"])
-        has_prec = any(k in cols for k in ["Precio Cliente Final en Soles", "Precio Cliente Final", "Precio", "precio"])
-        if has_f and has_p and has_prec:
-            col_f    = next(cols[k] for k in ["Ferreteria", "Ferretería", "ferreteria"] if k in cols)
-            col_prod = next(cols[k] for k in ["Producto", "producto"] if k in cols)
-            col_prec = next(cols[k] for k in ["Precio Cliente Final en Soles", "Precio Cliente Final", "Precio", "precio"] if k in cols)
-            precios_df = df.rename(columns={col_f:"Ferreteria", col_prod:"Producto", col_prec:"Precio"}).copy()
-            precios_df["Precio"] = pd.to_numeric(precios_df["Precio"], errors="coerce")
-            precios_df["__JOIN_KEY__"] = precios_df["Ferreteria"].apply(normalize_name)
-            break
-
-    # Detectar COORDENADAS
-    coords_df = None
-    for sh, df in frames.items():
-        cols = {c.strip(): c for c in df.columns}
-        if any(k in cols for k in ["Nombre del Asociado", "nombre del asociado"]) and \
-           any(k in cols for k in ["Coordenadas", "coordenadas"]):
-            col_name  = next(cols[k] for k in ["Nombre del Asociado", "nombre del asociado"] if k in cols)
-            col_coord = next(cols[k] for k in ["Coordenadas", "coordenadas"] if k in cols)
-            tmp = df[[col_name, col_coord]].copy().rename(columns={
-                col_name: "Nombre del Asociado",
-                col_coord: "Coordenadas"
-            })
-            def parse_pair(s):
-                if pd.isna(s): return pd.NA, pd.NA
-                t = str(s).strip().replace(" ", "")
-                parts = t.split(",")
-                if len(parts) >= 2:
-                    lat_s, lon_s = parts[0], parts[1]
-                    lat_s = lat_s.replace(".", "X").replace(",", ".").replace("X", ".")
-                    lon_s = lon_s.replace(".", "X").replace(",", ".").replace("X", ".")
-                    try:
-                        return float(lat_s), float(lon_s)
-                    except:
-                        return pd.NA, pd.NA
-                return pd.NA, pd.NA
-            tmp[["latitud","longitud"]] = tmp["Coordenadas"].apply(lambda s: pd.Series(parse_pair(s)))
-            tmp["__JOIN_KEY__"] = tmp["Nombre del Asociado"].apply(normalize_name)
-            coords_df = tmp[["Nombre del Asociado","latitud","longitud","__JOIN_KEY__"]].dropna(subset=["latitud","longitud"])
-            break
-
-    # Detectar INFORMACIÓN
-    info_df = None
-    for sh, df in frames.items():
-        if sh.lower() in ['informacion', 'información', 'info']:
-            # Buscar columnas que contengan información del asociado
-            cols = {c.strip(): c for c in df.columns}
-            if any(k in cols for k in ["Nombre del Asociado", "nombre del asociado"]):
-                col_name = next(cols[k] for k in ["Nombre del Asociado", "nombre del asociado"] if k in cols)
-                info_df = df.copy()
-                info_df["__JOIN_KEY__"] = info_df[col_name].apply(normalize_name)
-                break
-
-    if info_df is None:
-        for sh, df in frames.items():
-            cols = {c.strip().lower(): c for c in df.columns}
-            has_asociado = any(k in cols for k in ["nombre del asociado", "asociado", "ferreteria"])
-            has_direccion = any(k in cols for k in ["dirección tienda", "direccion tienda", "direccion", "dirección"])
-            has_contacto = any(k in cols for k in ["persona de contacto", "contacto", "numero de contacto"])
-            
-            if has_asociado and (has_direccion or has_contacto):
-                info_df = df.copy()
-                # Normalizar nombres de columnas
-                for old_col in df.columns:
-                    old_lower = old_col.strip().lower()
-                    if "nombre del asociado" in old_lower or "asociado" in old_lower:
-                        info_df["__JOIN_KEY__"] = info_df[old_col].apply(normalize_name)
-                break
     if precios_df is None:
         st.error("No encontré la hoja de PRECIOS (Ferreteria, Producto, Precio...).")
         for sh, df in frames.items(): st.write(f"**Hoja {sh}** →", list(df.columns))
@@ -226,8 +132,6 @@ def leer_excel(path):
         st.error("No encontré la hoja de COORDENADAS (Nombre del Asociado, Coordenadas).")
         for sh, df in frames.items(): st.write(f"**Hoja {sh}** →", list(df.columns))
         st.stop()
-    if info_df is None:
-        st.warning("No encontré la hoja de INFORMACIÓN. Las proformas no incluirán datos de contacto.")
 
     base = precios_df.merge(
         coords_df[["__JOIN_KEY__","latitud","longitud"]],
@@ -240,8 +144,7 @@ def leer_excel(path):
 
     precios_clean = precios_df.rename(columns={"__JOIN_KEY__":"_join_key"}).copy()
     coords_clean  = coords_df.rename(columns={"__JOIN_KEY__":"_join_key"}).copy()
-    info_clean = info_df.rename(columns={"__JOIN_KEY__":"_join_key"}).copy() if info_df is not None else pd.DataFrame()
-    return base, precios_clean, coords_clean, info_clean
+    return base, precios_clean, coords_clean
 
 base_df, precios_df, coords_df = leer_excel(EXCEL_PATH)
 
@@ -469,8 +372,10 @@ def pantalla_productos():
         if st.button("Continuar", disabled=disabled, use_container_width=True):
             st.session_state["paso"] = "mapa"; st.rerun()
 
-
-
+# ===========================
+# UI: MAPA (rápido + resiliente)
+# ===========================
+# Sección corregida de la función pantalla_mapa()
 def pantalla_mapa():
     st.markdown("<h1 class='main-header'>Elige tu ubicación</h1>", unsafe_allow_html=True)
     if not st.session_state["carrito"]:
@@ -582,7 +487,6 @@ def pantalla_mapa():
             else:
                 st.session_state["ubicacion"] = {"lat": lat, "lon": lon, "direccion": f"Coordenadas: {lat:.6f}, {lon:.6f}"}
                 st.info("📍 Coordenadas seleccionadas. (Activa el reverse geocode para nombre de calle)")
-
 
 
 
