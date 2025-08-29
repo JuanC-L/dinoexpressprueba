@@ -25,11 +25,11 @@ from reportlab.lib.utils import ImageReader
 # ===========================
 # CONFIG
 # ===========================
-LOGO_PATH = "LOGO DINO EXPRESS.jpg"  # logo
+LOGO_PATH = "LOGO DINO EXPRESS.jpg"
 st.set_page_config(page_title="DINO EXPRESS", page_icon=LOGO_PATH, layout="wide")
 EXCEL_PATH = "dinoe.xlsx"
 MAP_ZOOM = 15
-FERRE_LOGO_URL = None  # Si quisieras usar ícono PNG para marcadores
+FERRE_LOGO_URL = None
 
 # ===========================
 # ESTILOS
@@ -43,42 +43,27 @@ st.markdown("""
   --brand: #d72525;
 }
 .block-container {max-width: 1200px;}
-/* HERO + LOGO CENTRADO */
-.hero {display:flex; flex-direction:column; align-items:center; gap:12px; padding:4px 0 8px;}
-.hero img { border-radius:12px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
-/* TITULOS */
 h1.main-header{ text-align:center;color:#fff;font-size:40px;font-weight:800;margin:10px 0 8px;}
 .subtle{color:var(--muted); text-align:center;}
-/* CARDS */
 .card, .producto, .card-addr {
   background: var(--bg-card); border:1px solid var(--border);
   border-radius:14px; padding:14px 16px;
 }
 .card-addr { margin: 10px 0 16px; }
-.pill {
-  display:inline-block; background:rgba(255,255,255,.08); border:1px solid var(--border); border-radius:999px;
-  padding:6px 12px; font-size:13px; color:#e8eaed;
-}
+.pill { display:inline-block; background:rgba(255,255,255,.08); border:1px solid var(--border);
+  border-radius:999px; padding:6px 12px; font-size:13px; color:#e8eaed; }
 .btn-primary button {
-  background:var(--brand) !important; color:#fff !important; border:none !important; border-radius:10px !important; font-weight:700 !important;
+  background:var(--brand) !important; color:#fff !important; border:none !important;
+  border-radius:10px !important; font-weight:700 !important;
 }
 .btn-ghost button {
-  background:transparent !important; color:#e8eaed !important; border:1px solid var(--border) !important; border-radius:10px !important;
+  background:transparent !important; color:#e8eaed !important; border:1px solid var(--border) !important;
+  border-radius:10px !important;
 }
 .price{font-size:24px; font-weight:800; color:#7cb7ff;}
 hr.soft{border:none; border-top:1px solid var(--border); margin:8px 0 10px;}
 .small{font-size:12px; color:var(--muted);}
-
-/* GRID 3x3 PARA PRODUCTOS */
-.grid3 {display:grid; grid-template-columns: repeat(3,1fr); gap:18px;}
-@media (max-width: 980px){ .grid3{grid-template-columns:repeat(2,1fr);} }
-@media (max-width: 640px){ .grid3{grid-template-columns:1fr;} }
-
-.producto{ text-align:center; box-shadow:0 2px 10px rgba(0,0,0,.12); min-height:140px; }
 .producto h4{ color:#ff8b8b; margin: 2px 0 6px 0;}
-.producto .qty { width: 70%; margin: 0 auto; }
-
-/* Popups folium legibles */
 .leaflet-popup-content { font-size:12px; line-height:1.25; }
 </style>
 """, unsafe_allow_html=True)
@@ -114,14 +99,19 @@ def resolve_col(df: pd.DataFrame, aliases: list[str]) -> str | None:
                 return real
     return None
 
-def render_header(title: str, subtitle: str = ""):
-    c1, c2, c3 = st.columns([1,2,1])
+def render_center_logo(width=240):
+    c1, c2, c3 = st.columns([1,1,1])
     with c2:
-        try: st.image(LOGO_PATH, width=240)
-        except Exception: pass
-        st.markdown(f"<h1 class='main-header'>{title}</h1>", unsafe_allow_html=True)
-        if subtitle:
-            st.markdown(f"<div class='subtle'>{subtitle}</div>", unsafe_allow_html=True)
+        try:
+            st.image(LOGO_PATH, width=width)
+        except Exception:
+            pass
+
+def render_header(title: str, subtitle: str = ""):
+    render_center_logo(width=240)
+    st.markdown(f"<h1 class='main-header'>{title}</h1>", unsafe_allow_html=True)
+    if subtitle:
+        st.markdown(f"<div class='subtle'>{subtitle}</div>", unsafe_allow_html=True)
 
 # ===========================
 # ESTADO
@@ -133,7 +123,7 @@ def init_state():
     ss.setdefault("ubicacion", {"lat": -12.0675, "lon": -77.0333, "direccion": "Lima, Perú"})
     ss.setdefault("radio_km", 3)
     ss.setdefault("last_click_ts", 0.0)
-    ss.setdefault("mostrar_todas_en_mapa", True)   # Siempre mostrar todas en el selector de mapa
+    ss.setdefault("mostrar_todas_en_mapa", True)
     ss.setdefault("filtro_categoria", "Todas")
     ss.setdefault("filtro_marca", "Todas")
 init_state()
@@ -146,7 +136,7 @@ def leer_excel(path):
     xls = pd.ExcelFile(path)
     frames = {sh: pd.read_excel(xls, sh) for sh in xls.sheet_names}
 
-    # PRECIOS (con Categoria/Marca opcionales)
+    # PRECIOS
     precios_df = None
     for sh, df in frames.items():
         cols_lc = {c.lower().strip(): c for c in df.columns}
@@ -347,7 +337,7 @@ def mon(v):
         return f"S/ {v}"
 
 # ===========================
-# PDF: Cotización (sin título rojo, logo grande)
+# PDF: Cotización
 # ===========================
 def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
     info = ferre.get("asociado_info", {}) or {}
@@ -355,9 +345,8 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
     c = canvas.Canvas(buf, pagesize=A4)
     W, H = A4
 
-    # Logo grande centrado a la izquierda (más espacio)
     x_logo = 2*cm
-    logo_h = 2.4*cm  # más alto
+    logo_h = 2.4*cm
     try:
         logo = ImageReader(LOGO_PATH)
         iw, ih = logo.getSize()
@@ -367,14 +356,12 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
     except Exception:
         pass
 
-    # Encabezado simple (sin texto rojo)
     c.setFillColor(colors.black); c.setFont("Helvetica", 10)
     c.drawString(2*cm, H - (logo_h + 2.2*cm), f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     c.drawString(2*cm, H - (logo_h + 2.7*cm), f"Ferretería: {ferre['ferreteria']}")
     c.setStrokeColor(colors.HexColor("#cccccc")); c.setLineWidth(0.8)
     c.line(2*cm, H - (logo_h + 3.2*cm), 19*cm, H - (logo_h + 3.2*cm))
 
-    # Información del asociado
     y = H - (logo_h + 4.3*cm)
     c.setFont("Helvetica-Bold", 12); c.drawString(2*cm, y, "Información del Asociado")
     y -= 0.35*cm; c.setLineWidth(0.6); c.setStrokeColor(colors.HexColor("#e0e0e0")); c.line(2*cm, y, 19*cm, y)
@@ -384,7 +371,6 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
         nonlocal y
         if y < 3.0*cm:
             c.showPage()
-            # volver a dibujar logo grande sin título
             try:
                 logo = ImageReader(LOGO_PATH)
                 iw, ih = logo.getSize()
@@ -407,7 +393,6 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
     else:
         line("No se encontró la ficha del asociado para esta ferretería.")
 
-    # Tabla de productos
     y -= 0.2*cm
     c.setFont("Helvetica-Bold", 10)
     c.drawString(2*cm, y, "Producto")
@@ -445,12 +430,10 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
         c.drawRightString(19.0*cm, y, mon(item["pt"]))
         y -= 0.5*cm
 
-    # Total
     c.line(13.8*cm, y-0.2*cm, 19*cm, y-0.2*cm)
     c.setFont("Helvetica-Bold", 12)
     c.drawRightString(15.0*cm, y-0.8*cm, "TOTAL")
     c.drawRightString(19.0*cm, y-0.8*cm, mon(ferre["total"]))
-
     c.setFont("Helvetica-Oblique", 9)
     c.drawString(2*cm, 2.2*cm, "Documento no válido como comprobante de pago. Precios referenciales de la ferretería seleccionada.")
     c.showPage(); c.save(); buf.seek(0)
@@ -460,8 +443,10 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
 # UI: HOME
 # ===========================
 def pantalla_home():
-    render_header("Cotiza tus productos",
-                  "Selecciona tu lista de materiales, elige tu zona y recibe una cotización de las mejores ferreterías cercanas.")
+    render_header(
+        "Cotiza tus productos",
+        "Selecciona tu lista de materiales, elige tu zona y recibe una cotización de las mejores ferreterías cercanas."
+    )
     cta_col = st.columns([1,1,1])[1]
     with cta_col:
         st.markdown("<div class='btn-primary'>", unsafe_allow_html=True)
@@ -470,13 +455,13 @@ def pantalla_home():
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ===========================
-# UI: PRODUCTOS (3x3 + filtros)
+# UI: PRODUCTOS (3×3 real + filtros)
 # ===========================
 def pantalla_productos():
     render_header("Selecciona tus materiales")
 
     categorias = ["Todas"] + sorted([c for c in precios_df.get("Categoria", pd.Series(dtype=str)).dropna().astype(str).unique()])
-    marcas     = ["Todas"] + sorted([m for m in precios_df.get("Marca", pd.Series(dtype=str)).dropna().astype(str).unique()])
+    marcas_all = ["Todas"] + sorted([m for m in precios_df.get("Marca", pd.Series(dtype=str)).dropna().astype(str).unique()])
 
     colf1, colf2, colf3 = st.columns([1,1,2])
     with colf1:
@@ -484,44 +469,46 @@ def pantalla_productos():
             index=categorias.index(st.session_state.get("filtro_categoria","Todas")) if st.session_state.get("filtro_categoria","Todas") in categorias else 0)
     with colf2:
         if st.session_state["filtro_categoria"] != "Todas":
-            marcas_filtradas = ["Todas"] + sorted(precios_df[precios_df.get("Categoria","").astype(str)==st.session_state["filtro_categoria"]].get("Marca", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
+            marcas_filtradas = ["Todas"] + sorted(
+                precios_df[precios_df.get("Categoria","").astype(str)==st.session_state["filtro_categoria"]]
+                .get("Marca", pd.Series(dtype=str)).dropna().astype(str).unique().tolist()
+            )
         else:
-            marcas_filtradas = marcas
+            marcas_filtradas = marcas_all
         current = st.session_state.get("filtro_marca","Todas")
         st.session_state["filtro_marca"] = st.selectbox("Marca", marcas_filtradas, index=marcas_filtradas.index(current) if current in marcas_filtradas else 0)
     with colf3:
         q = st.text_input("Buscar producto", placeholder="Ej: Cemento, clavos, arena...")
 
-    # Filtrado
-    productos_series = precios_df["Producto"].dropna().astype(str)
+    # Filtrar productos
+    df_f = precios_df.copy()
     if st.session_state["filtro_categoria"] != "Todas":
-        productos_series = precios_df[precios_df.get("Categoria","").astype(str)==st.session_state["filtro_categoria"]]["Producto"].dropna().astype(str)
+        df_f = df_f[df_f.get("Categoria","").astype(str) == st.session_state["filtro_categoria"]]
     if st.session_state["filtro_marca"] != "Todas":
-        mask = (precios_df.get("Marca","").astype(str)==st.session_state["filtro_marca"])
-        if st.session_state["filtro_categoria"] != "Todas":
-            mask &= (precios_df.get("Categoria","").astype(str)==st.session_state["filtro_categoria"])
-        productos_series = precios_df[mask]["Producto"].dropna().astype(str)
-
-    productos = sorted(productos_series.unique().tolist())
+        df_f = df_f[df_f.get("Marca","").astype(str) == st.session_state["filtro_marca"]]
+    productos = sorted(df_f["Producto"].dropna().astype(str).unique().tolist())
     if q:
         ql = q.lower()
-        productos = [p for p in productos if ql in str(p).lower()]
+        productos = [p for p in productos if ql in p.lower()]
 
-    # Grid 3x3
-    st.markdown("<div class='grid3'>", unsafe_allow_html=True)
-    for prod in productos:
-        st.markdown(f"<div class='producto'><h4>{prod}</h4>", unsafe_allow_html=True)
-        # number input compacto
-        def update_cart(key_prod=prod):
-            val = st.session_state.get(f"qty::{key_prod}", 0)
-            if val>0: st.session_state["carrito"][key_prod] = val
-            else: st.session_state["carrito"].pop(key_prod, None)
-        st.number_input("Cantidad", min_value=0, step=1,
-                        key=f"qty::{prod}",
-                        value=st.session_state["carrito"].get(prod, 0),
-                        on_change=update_cart, label_visibility="collapsed", help="", format="%d",)
-        st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    # 3×3 con st.columns(3)
+    for i in range(0, len(productos), 3):
+        cols = st.columns(3)
+        for j in range(3):
+            if i+j >= len(productos): break
+            prod = productos[i+j]
+            with cols[j]:
+                st.markdown("<div class='producto'>", unsafe_allow_html=True)
+                st.markdown(f"<h4 style='text-align:center'>{prod}</h4>", unsafe_allow_html=True)
+                def update_cart(key_prod=prod):
+                    val = st.session_state.get(f"qty::{key_prod}", 0)
+                    if val>0: st.session_state["carrito"][key_prod] = val
+                    else: st.session_state["carrito"].pop(key_prod, None)
+                st.number_input("Cantidad", min_value=0, step=1,
+                                key=f"qty::{prod}",
+                                value=st.session_state["carrito"].get(prod, 0),
+                                on_change=update_cart)
+                st.markdown("</div>", unsafe_allow_html=True)
 
     # Sidebar resumen
     st.sidebar.markdown("### Resumen")
@@ -550,7 +537,7 @@ def pantalla_productos():
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ===========================
-# UI: MAPA (logo centrado, sin panel lateral)
+# UI: MAPA
 # ===========================
 def pantalla_mapa():
     render_header("Elige tu ubicación")
@@ -561,7 +548,6 @@ def pantalla_mapa():
             st.session_state["paso"] = "productos"
         return
 
-    # Buscador
     with st.form("buscar_direccion", clear_on_submit=False):
         addr = st.text_input("Ingresa tu ubicación (dirección o referencia)", value="",
                              placeholder="Ej: Av. Arequipa 123, Lima", key="addr_input")
@@ -575,8 +561,6 @@ def pantalla_mapa():
             st.error("❌ No se pudo encontrar la dirección. Intenta con otra descripción o haz clic en el mapa.")
 
     u = st.session_state["ubicacion"]
-
-    # Tarjeta ubicación
     st.markdown(f"""
     <div class='card-addr'>
       <div><span class='pill'>📍 Ubicación seleccionada</span></div>
@@ -585,13 +569,12 @@ def pantalla_mapa():
     </div>
     """, unsafe_allow_html=True)
 
-    # Mapa (siempre mostrando todas las ferreterías)
     m = folium.Map(location=[u["lat"], u["lon"]], zoom_start=MAP_ZOOM, tiles="CartoDB positron")
     folium.Marker([u["lat"], u["lon"]], popup=u.get("direccion", "Tu ubicación"),
                   icon=folium.Icon(color="red", icon="home")).add_to(m)
 
     all_coords = base_df.dropna(subset=["latitud","longitud"]).copy()
-    capa_df = all_coords  # siempre todas
+    capa_df = all_coords
     if not capa_df.empty:
         cluster = MarkerCluster().add_to(m)
         for _, r in capa_df.groupby(["Ferreteria","latitud","longitud"]).first().reset_index().iterrows():
@@ -630,7 +613,6 @@ def pantalla_mapa():
             st.session_state["ubicacion"] = {"lat": lat, "lon": lon, "direccion": g2["direccion"]}
             st.success("📍 Ubicación actualizada desde el mapa.")
 
-    # CTA
     st.markdown("<div class='btn-primary'>", unsafe_allow_html=True)
     if st.button("🔍 Buscar ferreterías cercanas", use_container_width=True):
         st.session_state["paso"] = "resultados"
@@ -642,24 +624,18 @@ def pantalla_mapa():
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ===========================
-# UI: RESULTADOS (sin vista previa, logo centrado)
+# UI: RESULTADOS (logo centrado + control de radio)
 # ===========================
 def tarjeta_ferreteria(ferreteria: dict, es_mejor: bool = False):
     st.markdown("""<div class='card' style="margin-bottom:14px;">""", unsafe_allow_html=True)
-    # Logo centrado en la tarjeta
-    cent = st.columns([1,1,1])[1]
-    with cent:
-        try: st.image(LOGO_PATH, width=160)
-        except Exception: pass
+    render_center_logo(width=160)
 
-    header = f"<h4 style='margin:8px 0 0 0;'>{ferreteria['ferreteria']}</h4>"
+    header = f"<h4 style='margin:8px 0 0 0;text-align:center'>{ferreteria['ferreteria']}</h4>"
     if es_mejor:
-        header = ("<div style='display:flex;justify-content:space-between;align-items:center;'>"
-                  f"{header}<span style='background:#e8f5e9;color:#2e7d32;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;'>"
-                  "✅ MEJOR OPCIÓN</span></div>")
+        header += "<div style='text-align:center;margin-top:4px;'><span style='background:#e8f5e9;color:#2e7d32;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;'>✅ MEJOR OPCIÓN</span></div>"
     st.markdown(header, unsafe_allow_html=True)
-    st.markdown(f"<p class='small' style='margin:6px 0;'>Distancia: {ferreteria['dist']:.2f} km</p>", unsafe_allow_html=True)
-    st.markdown(f"<div class='price'>{mon(ferreteria['total'])}</div>", unsafe_allow_html=True)
+    st.markdown(f"<p class='small' style='margin:6px 0;text-align:center'>Distancia: {ferreteria['dist']:.2f} km</p>", unsafe_allow_html=True)
+    st.markdown(f"<div class='price' style='text-align:center'>{mon(ferreteria['total'])}</div>", unsafe_allow_html=True)
 
     info = ferreteria.get("asociado_info", {}) or {}
     if info:
@@ -678,7 +654,6 @@ def tarjeta_ferreteria(ferreteria: dict, es_mejor: bool = False):
         st.markdown(f"<div class='small' style='color:#7cb7ff;font-weight:600;'>"
                     f"{mon(it['pt'])} ({mon(it['pu'])} c/u)</div>", unsafe_allow_html=True)
 
-    # Generar PDF (sin botón de vista previa)
     pdf_bytes = pdf_proforma_bytes(ferreteria, st.session_state["ubicacion"])
     st.markdown("<div class='btn-primary'>", unsafe_allow_html=True)
     st.download_button(
@@ -746,9 +721,15 @@ def pantalla_resultados():
 
         folium_static(m, width=520, height=520)
 
+        # ► Control para ampliar radio (como pediste)
+        nuevo_radio = st.slider("Radio (km)", 1, 15, st.session_state["radio_km"], key="radio_tmp_res")
+        if st.button("Aplicar nuevo radio", use_container_width=True):
+            st.session_state["radio_km"] = nuevo_radio
+            st.experimental_rerun()
+
     with col_list:
         if not resumen:
-            st.info("No hay ferreterías con tus productos dentro del radio. Ajusta el carrito.")
+            st.info("No hay ferreterías con tus productos dentro del radio. Ajusta el carrito o amplía el radio.")
         else:
             for i, f in enumerate(resumen):
                 tarjeta_ferreteria(f, es_mejor=(i == 0))
