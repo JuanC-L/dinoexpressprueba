@@ -671,10 +671,12 @@ def pantalla_resultados():
 
     if not st.session_state["carrito"]:
         st.warning("Tu carrito está vacío. Regresa y selecciona productos.")
-        if st.button("← Volver a productos"): st.session_state["paso"] = "productos"
+        if st.button("← Volver a productos"): 
+            st.session_state["paso"] = "productos"
         return
 
-    u = st.session_state["ubicacion"]; radio = st.session_state["radio_km"]
+    u = st.session_state["ubicacion"]
+    radio = st.session_state["radio_km"]
     cercanas = ferreterias_en_radio(u["lat"], u["lon"], radio)
     resumen = resumen_por_ferreteria(cercanas, st.session_state["carrito"])[:3]
 
@@ -687,15 +689,22 @@ def pantalla_resultados():
     """, unsafe_allow_html=True)
 
     col_map, col_list = st.columns([1, 1])
+
+    # -------- MAPA --------
     with col_map:
         m = folium.Map(location=[u["lat"], u["lon"]], zoom_start=MAP_ZOOM, tiles="CartoDB positron")
-        folium.Marker([u["lat"], u["lon"]], popup="Tu ubicación", icon=folium.Icon(color="red", icon="home")).add_to(m)
-        folium.Circle(radius=radio*1000, location=[u["lat"], u["lon"]], color='blue', fill=True, fill_color='blue', fill_opacity=0.08).add_to(m)
+        folium.Marker([u["lat"], u["lon"]], popup="Tu ubicación",
+                      icon=folium.Icon(color="red", icon="home")).add_to(m)
+        folium.Circle(
+            radius=radio*1000, location=[u["lat"], u["lon"]],
+            color='blue', fill=True, fill_color='blue', fill_opacity=0.08
+        ).add_to(m)
 
         if resumen:
             mejor = resumen[0]
             for i, f in enumerate(resumen):
-                icon = folium.Icon(color="green" if i==0 else "blue", icon="star" if i==0 else "shopping-cart")
+                icon = folium.Icon(color="green" if i==0 else "blue",
+                                   icon="star" if i==0 else "shopping-cart")
                 info = f.get("asociado_info", {}) or {}
                 info_html = ""
                 if info:
@@ -716,17 +725,22 @@ def pantalla_resultados():
                     {info_html}
                 </div>
                 """
-                folium.Marker([f["lat"], f["lon"]], popup=folium.Popup(popup_html, max_width=320), icon=icon).add_to(m)
-            AntPath([[u["lat"], u["lon"]], [mejor["lat"], mejor["lon"]]], weight=5, opacity=0.8).add_to(m)
+                folium.Marker([f["lat"], f["lon"]],
+                              popup=folium.Popup(popup_html, max_width=320),
+                              icon=icon).add_to(m)
+            AntPath([[u["lat"], u["lon"]], [mejor["lat"], mejor["lon"]]],
+                    weight=5, opacity=0.8).add_to(m)
 
-        folium_static(m, width=520, height=520)
+        # ✅ usar st_folium (no folium_static)
+        st_folium(m, width=520, height=520)
 
-        # ► Control para ampliar radio (como pediste)
+        # ► Control para ampliar radio (con st.rerun)
         nuevo_radio = st.slider("Radio (km)", 1, 15, st.session_state["radio_km"], key="radio_tmp_res")
         if st.button("Aplicar nuevo radio", use_container_width=True):
             st.session_state["radio_km"] = nuevo_radio
-            st.experimental_rerun()
+            st.rerun()  # ← reemplaza experimental_rerun
 
+    # -------- LISTA --------
     with col_list:
         if not resumen:
             st.info("No hay ferreterías con tus productos dentro del radio. Ajusta el carrito o amplía el radio.")
@@ -734,15 +748,19 @@ def pantalla_resultados():
             for i, f in enumerate(resumen):
                 tarjeta_ferreteria(f, es_mejor=(i == 0))
 
+    # Navegación
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("<div class='btn-ghost'>", unsafe_allow_html=True)
-        if st.button("← Volver a ubicación"): st.session_state["paso"] = "mapa"
+        if st.button("← Volver a ubicación"): 
+            st.session_state["paso"] = "mapa"
         st.markdown("</div>", unsafe_allow_html=True)
     with c2:
         st.markdown("<div class='btn-ghost'>", unsafe_allow_html=True)
-        if st.button("← Volver a productos"): st.session_state["paso"] = "productos"
+        if st.button("← Volver a productos"): 
+            st.session_state["paso"] = "productos"
         st.markdown("</div>", unsafe_allow_html=True)
+
 
 # ===========================
 # ROUTER
@@ -755,3 +773,4 @@ elif st.session_state["paso"] == "mapa":
     pantalla_mapa()
 else:
     pantalla_resultados()
+
