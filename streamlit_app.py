@@ -6,6 +6,8 @@ import io
 import time
 import unicodedata
 from datetime import datetime
+import base64
+import re
 
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
@@ -24,34 +26,94 @@ from reportlab.lib.utils import ImageReader
 # ===========================
 # CONFIG
 # ===========================
-st.set_page_config(page_title="DINO EXPRESS", page_icon="🦖", layout="wide")
-EXCEL_PATH = "dinoe.xlsx"     # <-- tu archivo con 2 hojas
-MAP_ZOOM = 15
-FERRE_LOGO_URL = None         # <-- opcional: URL PNG para icono de ferreterías
-# ===========================
-# CONFIG
-# ===========================
-LOGO_PATH = "LOGO DINO EXPRESS.jpg"  # <-- tu archivo de logo
-
-# si prefieres usar el logo en lugar del emoji como ícono de la pestaña:
+LOGO_PATH = "LOGO DINO EXPRESS.jpg"  # archivo de logo
 st.set_page_config(page_title="DINO EXPRESS", page_icon=LOGO_PATH, layout="wide")
+EXCEL_PATH = "dinoe.xlsx"     # tu Excel
+MAP_ZOOM = 15
+FERRE_LOGO_URL = None         # si quieres usar un PNG como icono en marcadores
 
-
+# Estilos base
 st.markdown("""
 <style>
-.main-header{ text-align:center;color:#d72525;font-size:32px;font-weight:700;margin:6px 0 10px;}
-.producto{ text-align:center;padding:16px 12px;border:1px solid #eee;border-radius:12px;background:#fff;
-           box-shadow:0 2px 8px rgba(0,0,0,.04);}
-.location-info{ background:#fff;border:1px solid #eee;border-radius:12px;padding:12px 14px;margin-top:10px;}
+/* contenedor */
+.block-container {max-width: 1200px;}
+/* tipografías */
+h1.main-header{ text-align:center;color:#fff;font-size:40px;font-weight:800;margin:10px 0 18px;}
+.subtle{color:#9aa0a6;}
+/* tarjetas y controles */
+.hero {
+  display:flex; flex-direction:column; align-items:center; gap:12px; padding:16px 0 8px;
+}
+.hero img { border-radius:12px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+.card, .producto, .location-info, .card-addr {
+  background: rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.10);
+  border-radius:14px; padding:14px 16px;
+}
+.producto{
+  text-align:center; box-shadow:0 2px 10px rgba(0,0,0,.12);
+}
 .pill {
-  display:inline-block; background:#fff; border:1px solid #e7e7e7; border-radius:999px;
-  padding:8px 14px; font-size:14px; box-shadow:0 1px 3px rgba(0,0,0,.06);
+  display:inline-block; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.16); border-radius:999px;
+  padding:6px 12px; font-size:13px; color:#e8eaed;
 }
-.card-addr {
-  border:1px solid #e7e7e7; border-radius:12px; padding:12px 14px; background:#fff; margin-top:8px;
+.card-addr { margin-top:10px; }
+.btn-primary button {
+  background:#d72525 !important; color:#fff !important; border:none !important; border-radius:10px !important; font-weight:700 !important;
 }
+.btn-ghost button {
+  background:transparent !important; color:#e8eaed !important; border:1px solid rgba(255,255,255,.16) !important; border-radius:10px !important;
+}
+.price{font-size:24px; font-weight:800; color:#7cb7ff;}
+hr.soft{border:none; border-top:1px solid rgba(255,255,255,.12); margin:8px 0 10px;}
+.small{font-size:12px; color:#9aa0a6;}
+/* grid productos */
+.grid3 {display:grid; grid-template-columns: repeat(3,1fr); gap:18px;}
+@media (max-width: 980px){ .grid3{grid-template-columns:repeat(2,1fr);} }
+@media (max-width: 640px){ .grid3{grid-template-columns:1fr;} }
+/* popup folium (mejor legibilidad) */
+.leaflet-popup-content { font-size:12px; line-height:1.25; }
 </style>
 """, unsafe_allow_html=True)
+
+# ===========================
+# HELPERS
+# ===========================
+def normalize_name(s: str) -> str:
+    if pd.isna(s): 
+        return ""
+    s = str(s).strip()
+    s = "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+    s = " ".join(s.split())
+    return s.upper()
+
+def _norm_header(s: str) -> str:
+    if s is None: return ""
+    s = "".join(c for c in unicodedata.normalize("NFD", str(s)) if unicodedata.category(c) != "Mn")
+    s = re.sub(r"[:;,\.\-–—]+", " ", s)
+    s = " ".join(s.strip().upper().split())
+    return s
+
+def resolve_col(df: pd.DataFrame, aliases: list[str]) -> str | None:
+    norm_cols = {_norm_header(c): c for c in df.columns}
+    for a in aliases:
+        a_norm = _norm_header(a)
+        if a_norm in norm_cols:
+            return norm_cols[a_norm]
+    for a in aliases:
+        a_norm = _norm_header(a)
+        for nc, real in norm_cols.items():
+            if a_norm in nc:
+                return real
+    return None
+
+def render_header(title: str, subtitle: str = ""):
+    c1, c2, c3 = st.columns([1,2,1])
+    with c2:
+        try: st.image(LOGO_PATH, width=220)
+        except Exception: pass
+        st.markdown(f"<h1 class='main-header'>{title}</h1>", unsafe_allow_html=True)
+        if subtitle:
+            st.markdown(f"<div class='subtle' style='text-align:center'>{subtitle}</div>", unsafe_allow_html=True)
 
 # ===========================
 # ESTADO
@@ -65,45 +127,49 @@ def init_state():
     ss.setdefault("last_click_ts", 0.0)
     ss.setdefault("revgeo_enabled", False)          # reverse-geocoding opcional (lento)
     ss.setdefault("mostrar_todas_en_mapa", True)    # ver todas las ferreterías en el selector de mapa
+    ss.setdefault("filtro_categoria", "Todas")
+    ss.setdefault("filtro_marca", "Todas")
 init_state()
 
 # ===========================
-# LECTURA DE EXCEL (2 hojas)
+# LECTURA DE EXCEL (precios, coords, informacion)
 # ===========================
 @st.cache_data
 def leer_excel(path):
     """
-    Hoja coords:  Nombre del Asociado | Coordenadas (texto 'lat,lon')
-    Hoja precios: Ferreteria | Categoría | Producto | Marca | Precio Cliente Final en Soles
-    Devuelve: base_df (precios + lat/long), precios_df, coords_df
+    Hoja coords:  Nombre del Asociado | Coordenadas ('lat,lon')
+    Hoja precios: Ferreteria | Producto | Precio (+ opcionales: Categoria | Marca)
+    Hoja informacion: (campos del asociado)
+    Devuelve:
+      base_df (precios + lat/long),
+      precios_df, coords_df, info_df, info_lookup (dict por __JOIN_KEY__)
     """
     xls = pd.ExcelFile(path)
     frames = {sh: pd.read_excel(xls, sh) for sh in xls.sheet_names}
 
-    def normalize_name(s: str) -> str:
-        if pd.isna(s): return ""
-        s = str(s).strip()
-        s = "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
-        s = " ".join(s.split())
-        return s.upper()
-
-    # Detectar PRECIOS
+    # --- PRECIOS (incluye opcionalmente Categoria/Marca)
     precios_df = None
     for sh, df in frames.items():
-        cols = {c.strip(): c for c in df.columns}
-        has_f = any(k in cols for k in ["Ferreteria", "Ferretería", "ferreteria"])
-        has_p = any(k in cols for k in ["Producto", "producto"])
-        has_prec = any(k in cols for k in ["Precio Cliente Final en Soles", "Precio Cliente Final", "Precio", "precio"])
-        if has_f and has_p and has_prec:
-            col_f    = next(cols[k] for k in ["Ferreteria", "Ferretería", "ferreteria"] if k in cols)
-            col_prod = next(cols[k] for k in ["Producto", "producto"] if k in cols)
-            col_prec = next(cols[k] for k in ["Precio Cliente Final en Soles", "Precio Cliente Final", "Precio", "precio"] if k in cols)
-            precios_df = df.rename(columns={col_f:"Ferreteria", col_prod:"Producto", col_prec:"Precio"}).copy()
+        cols_lc = {c.lower().strip(): c for c in df.columns}
+        def pick(*names):
+            for n in names:
+                if n.lower() in cols_lc: return cols_lc[n.lower()]
+            return None
+        col_f    = pick("Ferreteria", "Ferretería", "ferreteria")
+        col_prod = pick("Producto", "producto")
+        col_prec = pick("Precio Cliente Final en Soles", "Precio Cliente Final", "Precio", "precio")
+        if col_f and col_prod and col_prec:
+            col_cat  = pick("Categoría", "Categoria", "categoria")
+            col_marc = pick("Marca", "marca")
+            rename_map = {col_f:"Ferreteria", col_prod:"Producto", col_prec:"Precio"}
+            if col_cat:  rename_map[col_cat]  = "Categoria"
+            if col_marc: rename_map[col_marc] = "Marca"
+            precios_df = df.rename(columns=rename_map).copy()
             precios_df["Precio"] = pd.to_numeric(precios_df["Precio"], errors="coerce")
             precios_df["__JOIN_KEY__"] = precios_df["Ferreteria"].apply(normalize_name)
             break
 
-    # Detectar COORDENADAS
+    # --- COORDENADAS
     coords_df = None
     for sh, df in frames.items():
         cols = {c.strip(): c for c in df.columns}
@@ -123,16 +189,51 @@ def leer_excel(path):
                     lat_s, lon_s = parts[0], parts[1]
                     lat_s = lat_s.replace(".", "X").replace(",", ".").replace("X", ".")
                     lon_s = lon_s.replace(".", "X").replace(",", ".").replace("X", ".")
-                    try:
-                        return float(lat_s), float(lon_s)
-                    except:
-                        return pd.NA, pd.NA
+                    try: return float(lat_s), float(lon_s)
+                    except: return pd.NA, pd.NA
                 return pd.NA, pd.NA
             tmp[["latitud","longitud"]] = tmp["Coordenadas"].apply(lambda s: pd.Series(parse_pair(s)))
             tmp["__JOIN_KEY__"] = tmp["Nombre del Asociado"].apply(normalize_name)
             coords_df = tmp[["Nombre del Asociado","latitud","longitud","__JOIN_KEY__"]].dropna(subset=["latitud","longitud"])
             break
 
+    # --- INFORMACION (ficha del asociado)
+    info_df = None
+    A_NOMBRE   = ["Nombre del Asociado", "Nombre del Asociado:"]
+    A_DIR      = ["Dirección tienda", "Direccion tienda", "Dirección tienda:", "Direccion tienda:"]
+    A_CTA      = ["Cta de abono para la venta", "Cuenta de abono para la venta", "Cta de abono para la venta:"]
+    A_CONTACTO = ["Persona de contacto", "Persona de contacto:"]
+    A_NUM      = ["Número de Contacto", "Numero de Contacto", "Celular", "Telefono", "Número de Contacto:"]
+    A_YAPE     = ["Número o Código Yape / Plin", "Numero o Codigo Yape / Plin", "Yape", "Plin", "Yape / Plin", "Número o Código Yape / Plin:"]
+
+    for sh, df in frames.items():
+        c_nombre = resolve_col(df, A_NOMBRE)
+        c_dir    = resolve_col(df, A_DIR)
+        c_cta    = resolve_col(df, A_CTA)
+        c_pers   = resolve_col(df, A_CONTACTO)
+        c_num    = resolve_col(df, A_NUM)
+        c_yape   = resolve_col(df, A_YAPE)
+        needed_cols = [c_nombre, c_dir, c_cta, c_pers, c_num, c_yape]
+        if all(c is not None for c in needed_cols):
+            info_df = df.rename(columns={
+                c_nombre: "Nombre del Asociado",
+                c_dir:    "Dirección tienda",
+                c_cta:    "Cta de abono para la venta",
+                c_pers:   "Persona de contacto",
+                c_num:    "Número de Contacto",
+                c_yape:   "Número o Código Yape / Plin",
+            })[[
+                "Nombre del Asociado",
+                "Dirección tienda",
+                "Cta de abono para la venta",
+                "Persona de contacto",
+                "Número de Contacto",
+                "Número o Código Yape / Plin",
+            ]].copy()
+            info_df["__JOIN_KEY__"] = info_df["Nombre del Asociado"].apply(normalize_name)
+            break
+
+    # Validaciones mínimas
     if precios_df is None:
         st.error("No encontré la hoja de PRECIOS (Ferreteria, Producto, Precio...).")
         for sh, df in frames.items(): st.write(f"**Hoja {sh}** →", list(df.columns))
@@ -141,21 +242,39 @@ def leer_excel(path):
         st.error("No encontré la hoja de COORDENADAS (Nombre del Asociado, Coordenadas).")
         for sh, df in frames.items(): st.write(f"**Hoja {sh}** →", list(df.columns))
         st.stop()
+    if info_df is None:
+        st.warning("No encontré la hoja de INFORMACIÓN del asociado. La cotización saldrá sin ficha del asociado.")
 
+    # base precios + coords (manteniendo Categoria/Marca si existen)
     base = precios_df.merge(
         coords_df[["__JOIN_KEY__","latitud","longitud"]],
-        on="__JOIN_KEY__", how="left"
+        left_on="__JOIN_KEY__", right_on="__JOIN_KEY__", how="left"
     ).drop(columns=["__JOIN_KEY__"])
 
     faltan = base["latitud"].isna().sum()
     if faltan > 0:
         st.warning(f"{faltan} registros no obtuvieron coordenadas. Verifica que 'Ferreteria' ≡ 'Nombre del Asociado'.")
 
+    # lookup por nombre normalizado
+    info_lookup = {}
+    if info_df is not None:
+        info_lookup = {
+            r["__JOIN_KEY__"]: {
+                "Nombre del Asociado": r.get("Nombre del Asociado",""),
+                "Dirección tienda": r.get("Dirección tienda",""),
+                "Cta de abono para la venta": r.get("Cta de abono para la venta",""),
+                "Persona de contacto": r.get("Persona de contacto",""),
+                "Número de Contacto": str(r.get("Número de Contacto","")),
+                "Número o Código Yape / Plin": str(r.get("Número o Código Yape / Plin","")),
+            }
+            for _, r in info_df.iterrows()
+        }
+
     precios_clean = precios_df.rename(columns={"__JOIN_KEY__":"_join_key"}).copy()
     coords_clean  = coords_df.rename(columns={"__JOIN_KEY__":"_join_key"}).copy()
-    return base, precios_clean, coords_clean
+    return base, precios_clean, coords_clean, (info_df if info_df is not None else pd.DataFrame()), info_lookup
 
-base_df, precios_df, coords_df = leer_excel(EXCEL_PATH)
+base_df, precios_df, coords_df, info_df, info_lookup = leer_excel(EXCEL_PATH)
 
 # ===========================
 # GEO & GEOCODING (resiliente)
@@ -163,46 +282,27 @@ base_df, precios_df, coords_df = leer_excel(EXCEL_PATH)
 def dist_km(a_lat, a_lon, b_lat, b_lon):
     return geodesic((a_lat, a_lon), (b_lat, b_lon)).kilometers
 
-# También mejora la función geocode_once para mejor manejo de errores:
 @st.cache_data(show_spinner=False)
 def geocode_once(q):
-    """
-    Geocoder robusto: captura errores y devuelve None cuando el servicio no está disponible.
-    """
+    """Geocoder robusto: captura errores y cachea el resultado."""
     if not q or not q.strip():
         return None
-        
     try:
         geocoder = Nominatim(user_agent="dino_pacasmayo_app", timeout=10)
-        
-        # Intentar geocodificar con diferentes formatos
-        queries = [
-            q.strip(),
-            f"{q.strip()}, Lima, Perú",
-            f"{q.strip()}, Perú"
-        ]
-        
+        queries = [q.strip(), f"{q.strip()}, Lima, Perú", f"{q.strip()}, Perú"]
         for query in queries:
             try:
                 loc = geocoder.geocode(query, timeout=8)
                 if loc:
-                    return {
-                        "lat": loc.latitude, 
-                        "lon": loc.longitude, 
-                        "direccion": loc.address
-                    }
+                    return {"lat": loc.latitude, "lon": loc.longitude, "direccion": loc.address}
             except (GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError):
                 continue
-                
         return None
-        
     except Exception as e:
         print(f"Error en geocodificación: {e}")
         return None
-    
 
 def geocodificar_inverso(lat, lon):
-    # Solo si el usuario lo pide (es más lento)
     try:
         geocoder = Nominatim(user_agent="dino_pacasmayo_app")
         loc = geocoder.reverse((lat, lon), timeout=8)
@@ -240,10 +340,13 @@ def resumen_por_ferreteria(filtrado: pd.DataFrame, carrito: dict):
             dist_val = g["distancia"].min() if "distancia" in g else dist_km(
                 st.session_state["ubicacion"]["lat"], st.session_state["ubicacion"]["lon"], lat, lon
             )
+            join_key = normalize_name(ferre)
+            asociado_info = info_lookup.get(join_key, {})
             out.append({
                 "ferreteria": ferre,
                 "lat": lat, "lon": lon, "dist": dist_val,
-                "total": total, "detalle": detalle, "faltantes": faltantes
+                "total": total, "detalle": detalle, "faltantes": faltantes,
+                "asociado_info": asociado_info
             })
     out.sort(key=lambda x: (x["total"], x["dist"]))
     return out
@@ -255,25 +358,21 @@ def mon(v):
         return f"S/ {v}"
 
 # ===========================
-# PDF + Tarjetas
+# PDF COTIZACIÓN (con logo, solo info del asociado)
 # ===========================
-from reportlab.lib.utils import ImageReader
-
-def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
+def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):  # nombre legado, genera "Cotización"
     info = ferre.get("asociado_info", {}) or {}
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     W, H = A4
 
-    # ========== Encabezado con LOGO + Título ==========
-    # Logo (si existe)
+    # Encabezado con logo + título
     y_top = H - 1.5*cm
     x_logo = 2*cm
-    logo_h = 1.6*cm  # altura del logo
+    logo_h = 1.6*cm
     title_x = 2*cm
     try:
         logo = ImageReader(LOGO_PATH)
-        # mantener proporción
         iw, ih = logo.getSize()
         ratio = logo_h / ih
         logo_w = iw * ratio
@@ -282,38 +381,27 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
     except Exception:
         pass
 
-    # Título
     c.setFillColor(colors.HexColor("#d72525"))
     c.setFont("Helvetica-Bold", 18)
     c.drawString(title_x, H - 2.2*cm, "DINO EXPRESS - Cotización")
 
-    # Subtítulo/fecha y ferretería
-    c.setFillColor(colors.black)
-    c.setFont("Helvetica", 10)
+    c.setFillColor(colors.black); c.setFont("Helvetica", 10)
     c.drawString(2*cm, H - 2.9*cm, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     c.drawString(2*cm, H - 3.4*cm, f"Ferretería: {ferre['ferreteria']}")
-    # *** Importante: NO mostramos datos del cliente ***
 
-    # Línea divisoria
-    c.setStrokeColor(colors.HexColor("#cccccc"))
-    c.setLineWidth(0.8)
+    c.setStrokeColor(colors.HexColor("#cccccc")); c.setLineWidth(0.8)
     c.line(2*cm, H - 3.9*cm, 19*cm, H - 3.9*cm)
 
-    # ========== Información del Asociado ==========
+    # Información del Asociado
     y = H - 4.8*cm
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(2*cm, y, "Información del Asociado")
-    y -= 0.35*cm
-    c.setLineWidth(0.6); c.setStrokeColor(colors.HexColor("#e0e0e0"))
-    c.line(2*cm, y, 19*cm, y)
-    y -= 0.4*cm
+    c.setFont("Helvetica-Bold", 12); c.drawString(2*cm, y, "Información del Asociado")
+    y -= 0.35*cm; c.setLineWidth(0.6); c.setStrokeColor(colors.HexColor("#e0e0e0")); c.line(2*cm, y, 19*cm, y)
+    y -= 0.4*cm; c.setFont("Helvetica", 10)
 
-    c.setFont("Helvetica", 10)
     def line(txt):
         nonlocal y
         if y < 3.0*cm:
             c.showPage()
-            # repetir encabezado minimal con logo en páginas siguientes
             try:
                 logo = ImageReader(LOGO_PATH)
                 iw, ih = logo.getSize()
@@ -338,7 +426,7 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
     else:
         line("No se encontró la ficha del asociado para esta ferretería.")
 
-    # ========== Detalle de productos ==========
+    # Detalle de productos
     y -= 0.2*cm
     c.setFont("Helvetica-Bold", 10)
     c.drawString(2*cm, y, "Producto")
@@ -351,7 +439,6 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
     for item in ferre["detalle"]:
         if y < 3.0*cm:
             c.showPage()
-            # encabezado en página siguiente
             try:
                 logo = ImageReader(LOGO_PATH)
                 iw, ih = logo.getSize()
@@ -363,7 +450,6 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
             c.setFillColor(colors.HexColor("#d72525")); c.setFont("Helvetica-Bold", 14)
             c.drawString(2*cm, H - 2.2*cm, "DINO EXPRESS - Cotización (cont.)")
             c.setFillColor(colors.black); c.setFont("Helvetica", 10)
-            # reponer encabezados de la tabla
             y = H - 3.2*cm
             c.setFont("Helvetica-Bold", 10)
             c.drawString(2*cm, y, "Producto")
@@ -380,127 +466,140 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
         c.drawRightString(19.0*cm, y, mon(item["pt"]))
         y -= 0.5*cm
 
-    # ========== Total ==========
+    # Total
     c.line(13.8*cm, y-0.2*cm, 19*cm, y-0.2*cm)
     c.setFont("Helvetica-Bold", 12)
     c.drawRightString(15.0*cm, y-0.8*cm, "TOTAL")
     c.drawRightString(19.0*cm, y-0.8*cm, mon(ferre["total"]))
 
-    # Pie (disclaimer)
+    # Pie
     c.setFont("Helvetica-Oblique", 9)
     c.drawString(2*cm, 2.2*cm, "Documento no válido como comprobante de pago. Precios referenciales de la ferretería seleccionada.")
 
     c.showPage(); c.save(); buf.seek(0)
     return buf
 
-
-def tarjeta_ferreteria(ferreteria: dict, es_mejor: bool = False):
-    try:
-           st.image(LOGO_PATH, width=140)
-    except Exception:
-           pass
-    st.markdown("""<div style="border:1px solid #e0e0e0; border-radius:10px; padding:14px; margin-bottom:14px; background:#fff;">""",
-                unsafe_allow_html=True)
-    header = f"<h4 style='margin:0;'>{ferreteria['ferreteria']}</h4>"
-    if es_mejor:
-        header = ("<div style='display:flex;justify-content:space-between;align-items:center;'>"
-                  f"{header}<span style='background:#e8f5e9;color:#2e7d32;padding:4px 10px;border-radius:4px;font-size:12px;font-weight:700;'>"
-                  "✅ MEJOR OPCIÓN</span></div>")
-    st.markdown(header, unsafe_allow_html=True)
-    st.markdown(f"<p style='margin:6px 0;color:#616161;'>Distancia: {ferreteria['dist']:.2f} km</p>", unsafe_allow_html=True)
-    st.markdown(f"<p style='font-size:22px;font-weight:700;color:#1976d2;margin:6px 0;'>{mon(ferreteria['total'])}</p>", unsafe_allow_html=True)
-    st.markdown("<div style='border-top:1px solid #f0f0f0; margin:6px 0 8px; padding-top:8px;'><b>Productos</b></div>", unsafe_allow_html=True)
-    for it in ferreteria["detalle"]:
-        st.markdown(f"<div style='font-size:13px;'>{it['producto']} x {it['cantidad']}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div style='color:#1976d2;font-weight:600;font-size:13px;'>{mon(it['pt'])} ({mon(it['pu'])} c/u)</div>", unsafe_allow_html=True)
-    if ferreteria.get("faltantes"):
-        st.markdown("<div style='background:#fff8e1;padding:8px;border-radius:6px;margin-top:8px;'><b style='color:#bf360c;'>No disponibles:</b></div>", unsafe_allow_html=True)
-        for p in ferreteria["faltantes"]:
-            st.markdown(f"<div style='padding-left:8px;color:#bf360c;font-size:13px;'>• {p}</div>", unsafe_allow_html=True)
-    pdf_bytes = pdf_proforma_bytes(ferreteria, st.session_state["ubicacion"])
-    st.download_button(
-        "📄 Descargar cotización (PDF)",
-        data=pdf_bytes,
-        file_name=f"cotizacion_{ferreteria['ferreteria'].replace(' ','_')}.pdf",
-        mime="application/pdf",
-        use_container_width=True
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
-
 # ===========================
 # UI: HOME
 # ===========================
 def pantalla_home():
-    st.image(LOGO_PATH, width=200)
-    st.markdown("<h1 class='main-header'>Cotiza tus productos</h1>", unsafe_allow_html=True)
-    if st.button("Empezar", use_container_width=True):
-        st.session_state["paso"] = "productos"
-        st.rerun()
+    render_header("Cotiza tus productos")
+    st.markdown("<div class='hero'>", unsafe_allow_html=True)
+    with st.container():
+        st.markdown("<div class='subtle' style='text-align:center'>Selecciona tu lista de materiales, elige tu zona y recibe una cotización de las mejores ferreterías cercanas.</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    cta = st.container()
+    with cta:
+        col = st.columns([1,1,1])[1]
+        with col:
+            placeholder = st.empty()
+            with placeholder.container():
+                st.markdown("<div class='btn-primary'>", unsafe_allow_html=True)
+                if st.button("Empezar", use_container_width=True):
+                    st.session_state["paso"] = "productos"
+                st.markdown("</div>", unsafe_allow_html=True)
 
 # ===========================
-# UI: PRODUCTOS
+# UI: PRODUCTOS (filtros + diseño)
 # ===========================
 def pantalla_productos():
-    st.markdown("<h1 class='main-header'>Selecciona tus materiales</h1>", unsafe_allow_html=True)
-    productos = sorted(precios_df["Producto"].dropna().unique().tolist())
-    q = st.text_input("Buscar producto")
+    render_header("Selecciona tus materiales")
+
+    # Filtros de categoría y marca (si existen)
+    categorias = ["Todas"] + sorted([c for c in precios_df.get("Categoria", pd.Series(dtype=str)).dropna().astype(str).unique()])
+    marcas     = ["Todas"] + sorted([m for m in precios_df.get("Marca", pd.Series(dtype=str)).dropna().astype(str).unique()])
+
+    colf1, colf2, colf3 = st.columns([1,1,2])
+    with colf1:
+        st.session_state["filtro_categoria"] = st.selectbox("Categoría", categorias, index=categorias.index(st.session_state.get("filtro_categoria","Todas")) if st.session_state.get("filtro_categoria","Todas") in categorias else 0)
+    with colf2:
+        # filtra marcas por categoría seleccionada
+        if st.session_state["filtro_categoria"] != "Todas":
+            marcas_filtradas = ["Todas"] + sorted(precios_df[precios_df.get("Categoria","").astype(str)==st.session_state["filtro_categoria"]].get("Marca", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
+        else:
+            marcas_filtradas = marcas
+        current = st.session_state.get("filtro_marca","Todas")
+        st.session_state["filtro_marca"] = st.selectbox("Marca", marcas_filtradas, index=marcas_filtradas.index(current) if current in marcas_filtradas else 0)
+    with colf3:
+        q = st.text_input("Buscar producto", placeholder="Ej: Cemento, clavos, arena...")
+
+    # Productos base
+    productos_series = precios_df["Producto"].dropna().astype(str)
+    if st.session_state["filtro_categoria"] != "Todas":
+        productos_series = precios_df[precios_df.get("Categoria","").astype(str)==st.session_state["filtro_categoria"]]["Producto"].dropna().astype(str)
+    if st.session_state["filtro_marca"] != "Todas":
+        mask = (precios_df.get("Marca","").astype(str)==st.session_state["filtro_marca"])
+        if st.session_state["filtro_categoria"] != "Todas":
+            mask &= (precios_df.get("Categoria","").astype(str)==st.session_state["filtro_categoria"])
+        productos_series = precios_df[mask]["Producto"].dropna().astype(str)
+
+    productos = sorted(productos_series.unique().tolist())
     if q:
         ql = q.lower()
         productos = [p for p in productos if ql in str(p).lower()]
 
-    for i in range(0, len(productos), 3):
-        cols = st.columns(3)
-        for j, col in enumerate(cols):
-            if i+j >= len(productos): break
-            prod = productos[i+j]
-            with col:
-                st.markdown(f"<div class='producto'><h4 style='color:#d72525'>{prod}</h4></div>", unsafe_allow_html=True)
-                qty = st.number_input("Cantidad", min_value=0, step=1, key=f"qty::{prod}",
-                                      value=st.session_state["carrito"].get(prod, 0))
-                if qty > 0: st.session_state["carrito"][prod] = qty
-                else: st.session_state["carrito"].pop(prod, None)
+    # Grid de productos
+    st.markdown("<div class='grid3'>", unsafe_allow_html=True)
+    for prod in productos:
+        with st.container():
+            st.markdown(f"<div class='producto'><h4 style='color:#ff8b8b;margin:0 0 6px 0'>{prod}</h4>", unsafe_allow_html=True)
+            # número con on_change para actualizar carrito
+            def update_cart(key_prod=prod):
+                val = st.session_state.get(f"qty::{key_prod}", 0)
+                if val>0: st.session_state["carrito"][key_prod] = val
+                else: st.session_state["carrito"].pop(key_prod, None)
+            st.number_input("Cantidad", min_value=0, step=1,
+                            key=f"qty::{prod}",
+                            value=st.session_state["carrito"].get(prod, 0),
+                            on_change=update_cart)
+            st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
+    # Sidebar resumen + CTA
     st.sidebar.markdown("### Resumen")
     if st.session_state["carrito"]:
         for p, qv in st.session_state["carrito"].items(): st.sidebar.write(f"• {p}: {qv} u.")
-        if st.sidebar.button("Continuar → ubicación"): st.session_state["paso"] = "mapa"; st.rerun()
+        st.sidebar.markdown("<div class='btn-primary'>", unsafe_allow_html=True)
+        if st.sidebar.button("Continuar → ubicación", use_container_width=True):
+            st.session_state["paso"] = "mapa"
+        st.sidebar.markdown("</div>", unsafe_allow_html=True)
     else:
         st.sidebar.info("Agrega productos para continuar.")
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    with col1:
+    # Navegación
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("<div class='btn-ghost'>", unsafe_allow_html=True)
         if st.button("← Volver al inicio", use_container_width=True):
-            st.session_state["paso"] = "home"; st.rerun()
-    with col2:
+            st.session_state["paso"] = "home"
+        st.markdown("</div>", unsafe_allow_html=True)
+    with c2:
         disabled = not bool(st.session_state["carrito"])
+        st.markdown("<div class='btn-primary'>", unsafe_allow_html=True)
         if st.button("Continuar", disabled=disabled, use_container_width=True):
-            st.session_state["paso"] = "mapa"; st.rerun()
+            st.session_state["paso"] = "mapa"
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # ===========================
-# UI: MAPA (rápido + resiliente)
+# UI: MAPA (lógica estable + diseño + logo)
 # ===========================
-# Sección corregida de la función pantalla_mapa()
 def pantalla_mapa():
-    st.markdown("<h1 class='main-header'>Elige tu ubicación</h1>", unsafe_allow_html=True)
+    render_header("Elige tu ubicación")
+
     if not st.session_state["carrito"]:
         st.warning("Tu carrito está vacío. Regresa y selecciona productos.")
         if st.button("← Volver a productos"):
             st.session_state["paso"] = "productos"
         return
 
-    # ---- LAYOUT -------------------------------------------------------------
     col1, col2 = st.columns([3, 1])
 
-    # ---- BUSCADOR (con botón; no geocodifica en cada tecla) ----------------
+    # Buscador con botón
     with col1:
         with st.form("buscar_direccion", clear_on_submit=False):
-            addr = st.text_input("Ingresa tu ubicación (dirección o referencia)",
-                                 value="",
-                                 placeholder="Ej: Av. Arequipa 123, Lima",
-                                 key="addr_input")
+            addr = st.text_input("Ingresa tu ubicación (dirección o referencia)", value="", placeholder="Ej: Av. Arequipa 123, Lima", key="addr_input")
             buscar_clicked = st.form_submit_button("🔍 Buscar")
-
     if buscar_clicked and addr.strip():
         g = geocode_once(addr.strip())
         if g:
@@ -511,43 +610,45 @@ def pantalla_mapa():
 
     u = st.session_state["ubicacion"]
 
-    # ---- TARJETA UBICACIÓN --------------------------------------------------
+    # Tarjeta ubicación
     st.markdown(f"""
-    <div class="card-addr">
-      <div><span class="pill">📍 Ubicación seleccionada</span></div>
+    <div class='card-addr'>
+      <div><span class='pill'>📍 Ubicación seleccionada</span></div>
       <div style="margin-top:6px;"><b>{u.get('direccion','Ubicación no especificada')}</b></div>
-      <div style="color:#666;">Lat: {u['lat']:.6f} &nbsp;&middot;&nbsp; Lon: {u['lon']:.6f}</div>
+      <div class='small'>Lat: {u['lat']:.6f} &nbsp;·&nbsp; Lon: {u['lon']:.6f}</div>
     </div>
     """, unsafe_allow_html=True)
 
-    # ---- OPCIONES LATERALES -------------------------------------------------
+    # Panel lateral
     with col2:
         st.markdown("<div class='location-info'><b>Opciones de vista</b></div>", unsafe_allow_html=True)
         st.checkbox("Ver todas las ferreterías en el mapa", key="mostrar_todas_en_mapa")
         tmp_radio = st.slider("Radio de búsqueda (km)", 1, 15, st.session_state["radio_km"], key="radio_tmp")
+        st.markdown("<div class='btn-ghost'>", unsafe_allow_html=True)
         if st.button("Aplicar radio"):
             st.session_state["radio_km"] = tmp_radio
-
+        st.markdown("</div>", unsafe_allow_html=True)
         st.checkbox("Obtener nombre de la dirección al hacer clic (más lento)", key="revgeo_enabled")
-
-        st.markdown("---")
-        if st.button("🔍 Buscar ferreterías cercanas", type="primary", use_container_width=True):
+        st.markdown("<hr class='soft'/>", unsafe_allow_html=True)
+        st.markdown("<div class='btn-primary'>", unsafe_allow_html=True)
+        if st.button("🔍 Buscar ferreterías cercanas", use_container_width=True):
             st.session_state["paso"] = "resultados"
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("<div class='btn-ghost'>", unsafe_allow_html=True)
         if st.button("← Volver a productos", use_container_width=True):
             st.session_state["paso"] = "productos"
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # ---- MAPA (ligero, sin reruns forzados) --------------------------------
-    # NOTA: construimos el mapa DESPUÉS de la posible actualización de 'ubicacion' por búsqueda
+    # Mapa
     m = folium.Map(location=[u["lat"], u["lon"]], zoom_start=MAP_ZOOM, tiles="CartoDB positron")
     folium.Marker([u["lat"], u["lon"]], popup=u.get("direccion", "Tu ubicación"),
                   icon=folium.Icon(color="red", icon="home")).add_to(m)
 
-    # Marcadores de ferreterías:
+    # Marcadores de ferreterías
     all_coords = base_df.dropna(subset=["latitud","longitud"]).copy()
     if st.session_state["mostrar_todas_en_mapa"]:
         capa_df = all_coords
     else:
-        # Calcula distancias SOLO si no mostramos todas
         if not all_coords.empty:
             capa_df = all_coords.assign(
                 distancia=all_coords.apply(
@@ -560,31 +661,42 @@ def pantalla_mapa():
 
     if not capa_df.empty:
         cluster = MarkerCluster().add_to(m)
-        # Usar first por Ferreteria/lat/lon para no duplicar por producto
         for _, r in capa_df.groupby(["Ferreteria","latitud","longitud"]).first().reset_index().iterrows():
             icon = folium.Icon(color="blue", icon="shopping-cart") if not FERRE_LOGO_URL \
                    else folium.CustomIcon(FERRE_LOGO_URL, icon_size=(28, 28))
+            join_key = normalize_name(r["Ferreteria"])
+            info = info_lookup.get(join_key, {}) if 'info_lookup' in globals() else {}
+            info_html = ""
+            if info:
+                info_html = f"""
+                    <div style='margin-top:6px;'>
+                        <div><b>Asociado:</b> {info.get('Nombre del Asociado','')}</div>
+                        <div><b>Dir:</b> {info.get('Dirección tienda','')}</div>
+                        <div><b>Cta:</b> {info.get('Cta de abono para la venta','')}</div>
+                        <div><b>Contacto:</b> {info.get('Persona de contacto','')} — {info.get('Número de Contacto','')}</div>
+                        <div><b>Yape/Plin:</b> {info.get('Número o Código Yape / Plin','')}</div>
+                    </div>
+                """
             popup_html = f"""
-                <div style='min-width:180px;padding:4px;'>
+                <div style='min-width:220px;padding:6px;'>
                     <b>{r['Ferreteria']}</b><br>
                     <small>Lat: {r['latitud']:.5f}, Lon: {r['longitud']:.5f}</small>
+                    {info_html}
                 </div>
             """
             folium.Marker([r["latitud"], r["longitud"]],
-                          popup=folium.Popup(popup_html, max_width=220),
+                          popup=folium.Popup(popup_html, max_width=320),
                           icon=icon).add_to(cluster)
 
-    # Habilita capturar clics (no fuerza rerender)
     map_ret = st_folium(m, width=900, height=520, returned_objects=["last_clicked"], key="map_selector")
 
-    # ---- CLICK EN MAPA (debounce + reverse opcional) ------------------------
+    # Click en mapa
     if map_ret and map_ret.get("last_clicked"):
         now = time.time()
-        if now - st.session_state["last_click_ts"] > 0.4:  # 400 ms
+        if now - st.session_state["last_click_ts"] > 0.4:
             st.session_state["last_click_ts"] = now
             lat = float(map_ret["last_clicked"]["lat"])
             lon = float(map_ret["last_clicked"]["lng"])
-
             if st.session_state["revgeo_enabled"]:
                 g2 = geocodificar_inverso(lat, lon)
                 st.session_state["ubicacion"] = {"lat": lat, "lon": lon, "direccion": g2["direccion"]}
@@ -593,29 +705,84 @@ def pantalla_mapa():
                 st.session_state["ubicacion"] = {"lat": lat, "lon": lon, "direccion": f"Coordenadas: {lat:.6f}, {lon:.6f}"}
                 st.info("📍 Coordenadas seleccionadas. (Activa el reverse geocode para nombre de calle)")
 
-
-
-
 # ===========================
-# UI: RESULTADOS
+# UI: RESULTADOS (mejor diseño + logo + preview)
 # ===========================
+def tarjeta_ferreteria(ferreteria: dict, es_mejor: bool = False):
+    st.markdown("""<div class='card' style="margin-bottom:14px;">""", unsafe_allow_html=True)
+    try: st.image(LOGO_PATH, width=140)
+    except Exception: pass
+
+    header = f"<h4 style='margin:8px 0 0 0;'>{ferreteria['ferreteria']}</h4>"
+    if es_mejor:
+        header = ("<div style='display:flex;justify-content:space-between;align-items:center;'>"
+                  f"{header}<span style='background:#e8f5e9;color:#2e7d32;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;'>"
+                  "✅ MEJOR OPCIÓN</span></div>")
+    st.markdown(header, unsafe_allow_html=True)
+    st.markdown(f"<p class='small' style='margin:6px 0;'>Distancia: {ferreteria['dist']:.2f} km</p>", unsafe_allow_html=True)
+    st.markdown(f"<div class='price'>{mon(ferreteria['total'])}</div>", unsafe_allow_html=True)
+
+    info = ferreteria.get("asociado_info", {}) or {}
+    if info:
+        st.markdown("<hr class='soft'/>", unsafe_allow_html=True)
+        st.markdown("<b>Asociado</b>", unsafe_allow_html=True)
+        st.markdown(f"<div class='small'><b>Nombre:</b> {info.get('Nombre del Asociado','')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='small'><b>Dirección:</b> {info.get('Dirección tienda','')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='small'><b>Cuenta:</b> {info.get('Cta de abono para la venta','')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='small'><b>Contacto:</b> {info.get('Persona de contacto','')} — {info.get('Número de Contacto','')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='small'><b>Yape/Plin:</b> {info.get('Número o Código Yape / Plin','')}</div>", unsafe_allow_html=True)
+
+    st.markdown("<hr class='soft'/>", unsafe_allow_html=True)
+    st.markdown("<b>Productos</b>", unsafe_allow_html=True)
+    for it in ferreteria["detalle"]:
+        st.markdown(f"<div class='small'>{it['producto']} × {it['cantidad']}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='small' style='color:#7cb7ff;font-weight:600;'>"
+                    f"{mon(it['pt'])} ({mon(it['pu'])} c/u)</div>", unsafe_allow_html=True)
+    if ferreteria.get("faltantes"):
+        st.markdown("<div style='background:#fff8e148;padding:8px;border-radius:6px;margin-top:8px;'><b style='color:#ffd54f;'>No disponibles:</b></div>", unsafe_allow_html=True)
+        for p in ferreteria["faltantes"]:
+            st.markdown(f"<div class='small' style='padding-left:8px;color:#ffd54f;'>• {p}</div>", unsafe_allow_html=True)
+
+    # PDF (+ preview popover)
+    pdf_bytes = pdf_proforma_bytes(ferreteria, st.session_state["ubicacion"])
+    b64 = base64.b64encode(pdf_bytes.getvalue()).decode()
+    iframe_html = f"""<iframe src="data:application/pdf;base64,{b64}" width="100%" height="520" style="border:1px solid rgba(255,255,255,.16);border-radius:8px;"></iframe>"""
+
+    try:
+        with st.popover("👁️ Vista previa", use_container_width=True):
+            st.markdown(iframe_html, unsafe_allow_html=True)
+    except Exception:
+        with st.expander("👁️ Vista previa"):
+            st.markdown(iframe_html, unsafe_allow_html=True)
+
+    st.markdown("<div class='btn-primary'>", unsafe_allow_html=True)
+    st.download_button(
+        "📄 Descargar cotización (PDF)",
+        data=pdf_bytes,
+        file_name=f"cotizacion_{ferreteria['ferreteria'].replace(' ','_')}.pdf",
+        mime="application/pdf",
+        use_container_width=True
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
 def pantalla_resultados():
-    st.markdown("<h1 class='main-header'>Ferreterías cercanas</h1>", unsafe_allow_html=True)
+    render_header("Ferreterías cercanas")
+
     if not st.session_state["carrito"]:
         st.warning("Tu carrito está vacío. Regresa y selecciona productos.")
-        if st.button("← Volver a productos"): st.session_state["paso"] = "productos"; st.rerun()
+        if st.button("← Volver a productos"): st.session_state["paso"] = "productos"
         return
 
     u = st.session_state["ubicacion"]; radio = st.session_state["radio_km"]
     cercanas = ferreterias_en_radio(u["lat"], u["lon"], radio)
     resumen = resumen_por_ferreteria(cercanas, st.session_state["carrito"])[:3]
 
-    # Tarjeta de ubicación elegida (también aquí)
     st.markdown(f"""
-    <div class="card-addr">
-      <div><span class="pill">📍 Ubicación seleccionada</span></div>
+    <div class='card-addr'>
+      <div><span class='pill'>📍 Ubicación seleccionada</span></div>
       <div style="margin-top:6px;"><b>{u.get('direccion','')}</b></div>
-      <div style="color:#666;">Lat: {u['lat']:.6f} &nbsp;&middot;&nbsp; Lon: {u['lon']:.6f}</div>
+      <div class='small'>Lat: {u['lat']:.6f} &nbsp;·&nbsp; Lon: {u['lon']:.6f}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -629,20 +796,36 @@ def pantalla_resultados():
             mejor = resumen[0]
             for i, f in enumerate(resumen):
                 icon = folium.Icon(color="green" if i==0 else "blue", icon="star" if i==0 else "shopping-cart")
+                info = f.get("asociado_info", {}) or {}
+                info_html = ""
+                if info:
+                    info_html = f"""
+                        <div style='margin-top:6px;font-size:12px;'>
+                            <div><b>Asociado:</b> {info.get('Nombre del Asociado','')}</div>
+                            <div><b>Dir:</b> {info.get('Dirección tienda','')}</div>
+                            <div><b>Cta:</b> {info.get('Cta de abono para la venta','')}</div>
+                            <div><b>Contacto:</b> {info.get('Persona de contacto','')} — {info.get('Número de Contacto','')}</div>
+                            <div><b>Yape/Plin:</b> {info.get('Número o Código Yape / Plin','')}</div>
+                        </div>
+                    """
                 popup_html = f"""
-                <div style='min-width:200px;padding:6px;'>
+                <div style='min-width:220px;padding:6px;'>
                     <b style='font-size:14px;'>{f['ferreteria']}</b><br>
                     <span style='font-size:12px;font-weight:700;color:#1e88e5;'>Precio: {mon(f['total'])}</span><br>
                     <span style='font-size:12px;'>Distancia: {f['dist']:.2f} km</span>
+                    {info_html}
                 </div>
                 """
-                folium.Marker([f["lat"], f["lon"]], popup=folium.Popup(popup_html, max_width=260), icon=icon).add_to(m)
+                folium.Marker([f["lat"], f["lon"]], popup=folium.Popup(popup_html, max_width=320), icon=icon).add_to(m)
             AntPath([[u["lat"], u["lon"]], [mejor["lat"], mejor["lon"]]], weight=5, opacity=0.8).add_to(m)
 
         folium_static(m, width=520, height=520)
 
         tmp_radio2 = st.slider("Radio (km)", 1, 15, st.session_state["radio_km"], key="radio_tmp2")
-        if st.button("Aplicar nuevo radio"): st.session_state["radio_km"] = tmp_radio2; st.rerun()
+        st.markdown("<div class='btn-ghost'>", unsafe_allow_html=True)
+        if st.button("Aplicar nuevo radio"):
+            st.session_state["radio_km"] = tmp_radio2
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with col_list:
         if not resumen:
@@ -651,11 +834,15 @@ def pantalla_resultados():
             for i, f in enumerate(resumen):
                 tarjeta_ferreteria(f, es_mejor=(i == 0))
 
-    col_back1, col_back2 = st.columns(2)
-    with col_back1:
-        if st.button("← Volver a ubicación"): st.session_state["paso"] = "mapa"; st.rerun()
-    with col_back2:
-        if st.button("← Volver a productos"): st.session_state["paso"] = "productos"; st.rerun()
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("<div class='btn-ghost'>", unsafe_allow_html=True)
+        if st.button("← Volver a ubicación"): st.session_state["paso"] = "mapa"
+        st.markdown("</div>", unsafe_allow_html=True)
+    with c2:
+        st.markdown("<div class='btn-ghost'>", unsafe_allow_html=True)
+        if st.button("← Volver a productos"): st.session_state["paso"] = "productos"
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # ===========================
 # ROUTER
@@ -668,5 +855,3 @@ elif st.session_state["paso"] == "mapa":
     pantalla_mapa()
 else:
     pantalla_resultados()
-
-
