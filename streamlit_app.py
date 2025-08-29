@@ -19,6 +19,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import cm
 from reportlab.lib import colors
+from reportlab.lib.utils import ImageReader
 
 # ===========================
 # CONFIG
@@ -27,6 +28,14 @@ st.set_page_config(page_title="DINO EXPRESS", page_icon="🦖", layout="wide")
 EXCEL_PATH = "dinoe.xlsx"     # <-- tu archivo con 2 hojas
 MAP_ZOOM = 15
 FERRE_LOGO_URL = None         # <-- opcional: URL PNG para icono de ferreterías
+# ===========================
+# CONFIG
+# ===========================
+LOGO_PATH = "LOGO DINO EXPRESS.jpg"  # <-- tu archivo de logo
+
+# si prefieres usar el logo en lugar del emoji como ícono de la pestaña:
+st.set_page_config(page_title="DINO EXPRESS", page_icon=LOGO_PATH, layout="wide")
+
 
 st.markdown("""
 <style>
@@ -248,19 +257,89 @@ def mon(v):
 # ===========================
 # PDF + Tarjetas
 # ===========================
+from reportlab.lib.utils import ImageReader
+
 def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
+    info = ferre.get("asociado_info", {}) or {}
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     W, H = A4
 
-    c.setFillColor(colors.HexColor("#d72525")); c.setFont("Helvetica-Bold", 16)
-    c.drawString(2*cm, H-2*cm, "DINO EXPRESS - Proforma")
-    c.setFillColor(colors.black); c.setFont("Helvetica", 10)
-    c.drawString(2*cm, H-2.7*cm, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-    c.drawString(2*cm, H-3.2*cm, f"Ferretería: {ferre['ferreteria']}")
-    c.drawString(2*cm, H-3.7*cm, f"Ubicación cliente: {ubic_usuario.get('direccion','')}")
+    # ========== Encabezado con LOGO + Título ==========
+    # Logo (si existe)
+    y_top = H - 1.5*cm
+    x_logo = 2*cm
+    logo_h = 1.6*cm  # altura del logo
+    title_x = 2*cm
+    try:
+        logo = ImageReader(LOGO_PATH)
+        # mantener proporción
+        iw, ih = logo.getSize()
+        ratio = logo_h / ih
+        logo_w = iw * ratio
+        c.drawImage(logo, x_logo, H - logo_h - 1.2*cm, width=logo_w, height=logo_h, mask='auto')
+        title_x = x_logo + logo_w + 0.6*cm
+    except Exception:
+        pass
 
-    y = H-4.6*cm
+    # Título
+    c.setFillColor(colors.HexColor("#d72525"))
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(title_x, H - 2.2*cm, "DINO EXPRESS - Cotización")
+
+    # Subtítulo/fecha y ferretería
+    c.setFillColor(colors.black)
+    c.setFont("Helvetica", 10)
+    c.drawString(2*cm, H - 2.9*cm, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    c.drawString(2*cm, H - 3.4*cm, f"Ferretería: {ferre['ferreteria']}")
+    # *** Importante: NO mostramos datos del cliente ***
+
+    # Línea divisoria
+    c.setStrokeColor(colors.HexColor("#cccccc"))
+    c.setLineWidth(0.8)
+    c.line(2*cm, H - 3.9*cm, 19*cm, H - 3.9*cm)
+
+    # ========== Información del Asociado ==========
+    y = H - 4.8*cm
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(2*cm, y, "Información del Asociado")
+    y -= 0.35*cm
+    c.setLineWidth(0.6); c.setStrokeColor(colors.HexColor("#e0e0e0"))
+    c.line(2*cm, y, 19*cm, y)
+    y -= 0.4*cm
+
+    c.setFont("Helvetica", 10)
+    def line(txt):
+        nonlocal y
+        if y < 3.0*cm:
+            c.showPage()
+            # repetir encabezado minimal con logo en páginas siguientes
+            try:
+                logo = ImageReader(LOGO_PATH)
+                iw, ih = logo.getSize()
+                ratio = logo_h / ih
+                logo_w = iw * ratio
+                c.drawImage(logo, x_logo, H - logo_h - 1.2*cm, width=logo_w, height=logo_h, mask='auto')
+            except Exception:
+                pass
+            c.setFillColor(colors.HexColor("#d72525")); c.setFont("Helvetica-Bold", 14)
+            c.drawString(2*cm, H - 2.2*cm, "DINO EXPRESS - Cotización (cont.)")
+            c.setFillColor(colors.black); c.setFont("Helvetica", 10)
+            y = H - 3.2*cm
+        c.drawString(2*cm, y, txt); y -= 0.46*cm
+
+    if info:
+        line(f"Nombre del Asociado: {info.get('Nombre del Asociado','')}")
+        line(f"Dirección tienda: {info.get('Dirección tienda','')}")
+        line(f"Cta de abono para la venta: {info.get('Cta de abono para la venta','')}")
+        line(f"Persona de contacto: {info.get('Persona de contacto','')}")
+        line(f"Número de Contacto: {info.get('Número de Contacto','')}")
+        line(f"Número o Código Yape/Plin: {info.get('Número o Código Yape / Plin','')}")
+    else:
+        line("No se encontró la ficha del asociado para esta ferretería.")
+
+    # ========== Detalle de productos ==========
+    y -= 0.2*cm
     c.setFont("Helvetica-Bold", 10)
     c.drawString(2*cm, y, "Producto")
     c.drawString(10.2*cm, y, "Cant.")
@@ -272,10 +351,27 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
     for item in ferre["detalle"]:
         if y < 3.0*cm:
             c.showPage()
-            c.setFont("Helvetica-Bold", 16); c.setFillColor(colors.HexColor("#d72525"))
-            c.drawString(2*cm, H-2*cm, "DINO EXPRESS - Proforma (cont.)")
+            # encabezado en página siguiente
+            try:
+                logo = ImageReader(LOGO_PATH)
+                iw, ih = logo.getSize()
+                ratio = logo_h / ih
+                logo_w = iw * ratio
+                c.drawImage(logo, x_logo, H - logo_h - 1.2*cm, width=logo_w, height=logo_h, mask='auto')
+            except Exception:
+                pass
+            c.setFillColor(colors.HexColor("#d72525")); c.setFont("Helvetica-Bold", 14)
+            c.drawString(2*cm, H - 2.2*cm, "DINO EXPRESS - Cotización (cont.)")
             c.setFillColor(colors.black); c.setFont("Helvetica", 10)
-            y = H-3.0*cm
+            # reponer encabezados de la tabla
+            y = H - 3.2*cm
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(2*cm, y, "Producto")
+            c.drawString(10.2*cm, y, "Cant.")
+            c.drawString(12.2*cm, y, "P. Unit.")
+            c.drawString(15.1*cm, y, "Importe")
+            c.line(2*cm, y-0.2*cm, 19*cm, y-0.2*cm)
+            c.setFont("Helvetica", 10); y -= 0.6*cm
 
         prod = str(item["producto"])[:48]
         c.drawString(2*cm, y, prod)
@@ -284,17 +380,25 @@ def pdf_proforma_bytes(ferre: dict, ubic_usuario: dict):
         c.drawRightString(19.0*cm, y, mon(item["pt"]))
         y -= 0.5*cm
 
+    # ========== Total ==========
     c.line(13.8*cm, y-0.2*cm, 19*cm, y-0.2*cm)
     c.setFont("Helvetica-Bold", 12)
     c.drawRightString(15.0*cm, y-0.8*cm, "TOTAL")
     c.drawRightString(19.0*cm, y-0.8*cm, mon(ferre["total"]))
 
+    # Pie (disclaimer)
     c.setFont("Helvetica-Oblique", 9)
     c.drawString(2*cm, 2.2*cm, "Documento no válido como comprobante de pago. Precios referenciales de la ferretería seleccionada.")
+
     c.showPage(); c.save(); buf.seek(0)
     return buf
 
+
 def tarjeta_ferreteria(ferreteria: dict, es_mejor: bool = False):
+    try:
+           st.image(LOGO_PATH, width=140)
+    except Exception:
+           pass
     st.markdown("""<div style="border:1px solid #e0e0e0; border-radius:10px; padding:14px; margin-bottom:14px; background:#fff;">""",
                 unsafe_allow_html=True)
     header = f"<h4 style='margin:0;'>{ferreteria['ferreteria']}</h4>"
@@ -315,9 +419,9 @@ def tarjeta_ferreteria(ferreteria: dict, es_mejor: bool = False):
             st.markdown(f"<div style='padding-left:8px;color:#bf360c;font-size:13px;'>• {p}</div>", unsafe_allow_html=True)
     pdf_bytes = pdf_proforma_bytes(ferreteria, st.session_state["ubicacion"])
     st.download_button(
-        "📄 Descargar proforma (PDF)",
+        "📄 Descargar cotización (PDF)",
         data=pdf_bytes,
-        file_name=f"proforma_{ferreteria['ferreteria'].replace(' ','_')}.pdf",
+        file_name=f"cotizacion_{ferreteria['ferreteria'].replace(' ','_')}.pdf",
         mime="application/pdf",
         use_container_width=True
     )
@@ -327,6 +431,7 @@ def tarjeta_ferreteria(ferreteria: dict, es_mejor: bool = False):
 # UI: HOME
 # ===========================
 def pantalla_home():
+    st.image(LOGO_PATH, width=200)
     st.markdown("<h1 class='main-header'>Cotiza tus productos</h1>", unsafe_allow_html=True)
     if st.button("Empezar", use_container_width=True):
         st.session_state["paso"] = "productos"
@@ -563,4 +668,5 @@ elif st.session_state["paso"] == "mapa":
     pantalla_mapa()
 else:
     pantalla_resultados()
+
 
